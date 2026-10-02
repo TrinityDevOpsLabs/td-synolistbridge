@@ -23,6 +23,11 @@ configure your speaker or Google account's list destination.
 
 ## Easy DSM setup — no SSH
 
+For production, download the source ZIP or `tar.gz` from a tagged stable
+GitHub Release and review its release notes. Use the default branch only for
+testing unreleased changes. This project has not published its initial release
+yet; the current files are development sources.
+
 1. Copy this project folder to `/volume1/docker/SynoListBridge` using DSM
    **File Station**.
 2. In **Container Manager → Project → Create**, select that folder and upload
@@ -208,6 +213,9 @@ to real accounts. A real account/NAS smoke test is required before production.
 The included `.github/workflows/ci.yaml` tests Python and builds both container
 architectures when this directory becomes the root of its own GitHub repository.
 It does not publish images and is not active from this nested directory.
+Repository ownership and generated release-note categories match the Jellyfin
+utility. See [RELEASING.md](RELEASING.md) for versioning, validation, tags, and
+the manual GitHub release process.
 
 ## License and attribution
 

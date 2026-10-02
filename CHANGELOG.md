@@ -1,7 +1,15 @@
 # Changelog
 
-## 0.1.0 — unreleased
+Notable changes to this project are documented here.
 
+The project follows [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Added
+
+- Add CODEOWNERS, categorized GitHub release notes, and a manual release
+  process matching Trinity DevOps LLC's Jellyfin Synology utility.
 - Add a one-time browser setup wizard and Docker-managed storage for DSM
   installation without SSH, manual secret files, or numeric user-ID setup.
 - Introduce standalone Google Keep → AnyList polling without Home Assistant.
