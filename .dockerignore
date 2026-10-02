@@ -1,0 +1,9 @@
+.git
+.env
+config.json
+secrets
+data
+tests
+__pycache__
+**/__pycache__
+.venv

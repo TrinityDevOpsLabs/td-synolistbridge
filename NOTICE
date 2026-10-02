@@ -1,0 +1,10 @@
+SynoListBridge
+Copyright 2026 Trinity DevOps LLC
+
+This product includes software developed by Trinity DevOps LLC.
+
+The Google Home → Google Keep → AnyList workflow was inspired by
+https://github.com/jfolger/google-home-anylist-bridge (MIT License).
+The original copyright and permission notice is preserved in
+licenses/original-bridge-MIT.txt. Original third-party material remains
+under its own license; Trinity DevOps LLC's new implementation is Apache-2.0.

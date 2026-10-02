@@ -1,0 +1,11 @@
+# Pinned runtime dependencies and their Python transitive dependencies.
+certifi==2026.7.22
+charset-normalizer==3.5.2
+future==1.0.0
+gkeepapi==0.17.1
+gpsoauth==2.0.0
+idna==3.20
+pyanylist==0.0.6
+pycryptodomex==3.23.0
+requests==2.34.2
+urllib3==2.8.0

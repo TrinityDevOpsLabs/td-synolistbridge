@@ -1,0 +1,8 @@
+SystemConfiguration bindings and system-configuration-sys
+Developed by Mullvad VPN
+https://github.com/mullvad/system-configuration-rs
+
+These crates declare MIT OR Apache-2.0. The Apache-2.0 option is
+selected for this notice bundle. Their published source archives and
+upstream repository do not include standalone license files. The full
+Apache-2.0 text is supplied here with the upstream authorship credit.

@@ -1,0 +1,9 @@
+{
+  "google_email": "bridge@example.com",
+  "anylist_email": "you@example.com",
+  "keep_list_id": "DISCOVER_KEEP_LIST_ID",
+  "anylist_list_id": "DISCOVER_ANYLIST_LIST_ID",
+  "poll_seconds": 60,
+  "google_token_file": "/run/secrets/google_master_token",
+  "anylist_password_file": "/run/secrets/anylist_password"
+}

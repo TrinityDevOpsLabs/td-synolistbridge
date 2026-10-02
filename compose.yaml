@@ -1,0 +1,31 @@
+services:
+  synolistbridge:
+    build: .
+    image: synolistbridge:local
+    restart: unless-stopped
+    user: "${BRIDGE_UID:-1000}:${BRIDGE_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 60s
+    environment:
+      TZ: "${TZ:-America/Denver}"
+    volumes:
+      - ./config.json:/config/config.json:ro
+      - ./data:/data
+    secrets:
+      - google_master_token
+      - anylist_password
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    healthcheck:
+      test: [CMD, python, -m, synolistbridge, health]
+      interval: 60s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+secrets:
+  google_master_token:
+    file: ./secrets/google_master_token
+  anylist_password:
+    file: ./secrets/anylist_password
