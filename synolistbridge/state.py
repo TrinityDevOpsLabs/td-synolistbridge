@@ -26,6 +26,11 @@ class State:
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS category_cache (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                refreshed REAL NOT NULL,
+                payload TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS transfers (
                 id TEXT PRIMARY KEY,
                 text TEXT NOT NULL,
@@ -43,6 +48,15 @@ class State:
             self.db.execute("INSERT OR IGNORE INTO metadata VALUES ('route', ?)", (encoded,))
             # A previous process may have died after the remote write succeeded.
             self.db.execute("UPDATE transfers SET status='review' WHERE status='sending'")
+
+    def load_categories(self):
+        row = self.db.execute("SELECT refreshed, payload FROM category_cache WHERE id=1").fetchone()
+        return (row["refreshed"], json.loads(row["payload"])) if row else None
+
+    def save_categories(self, refreshed, payload):
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO category_cache VALUES (1, ?, ?)",
+                            (refreshed, json.dumps(payload)))
 
     def get(self, item_id):
         return self.db.execute("SELECT * FROM transfers WHERE id=?", (item_id,)).fetchone()

@@ -9,6 +9,9 @@ services:
     security_opt: ["no-new-privileges:true"]
     stop_grace_period: 60s
     environment:
+      BRIDGE_POLL_INTERVAL: "${BRIDGE_POLL_INTERVAL:-}"
+      BRIDGE_CATEGORY_REFRESH_INTERVAL: "${BRIDGE_CATEGORY_REFRESH_INTERVAL:-7d}"
+      BRIDGE_CATEGORY_MATCHING: "${BRIDGE_CATEGORY_MATCHING:-true}"
       BRIDGE_DELETE_KEEP_ITEMS: "${BRIDGE_DELETE_KEEP_ITEMS:-false}"
       TZ: "${TZ:-America/Denver}"
     volumes:

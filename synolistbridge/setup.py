@@ -1,11 +1,12 @@
 # Copyright 2026 Trinity DevOps LLC
 # SPDX-License-Identifier: Apache-2.0
 """One-time interactive terminal setup; never performs transfers."""
-import getpass
+import termios
 import sys
 import json
 import os
 import tempfile
+import secrets
 from dataclasses import asdict
 from pathlib import Path
 
@@ -91,6 +92,53 @@ def choose_list(title, lists):
         print("Enter one of the listed numbers.")
 
 
+def masked_input(prompt):
+    """Read a secret from the interactive Linux terminal with star feedback."""
+    descriptor = sys.stdin.fileno()
+    original = termios.tcgetattr(descriptor)
+    settings = termios.tcgetattr(descriptor)
+    settings[3] &= ~(termios.ECHO | termios.ICANON)
+    settings[6][termios.VMIN] = 1
+    settings[6][termios.VTIME] = 0
+    chars = []
+    print(prompt, end="", flush=True)
+    try:
+        termios.tcsetattr(descriptor, termios.TCSANOW, settings)
+        while True:
+            char = sys.stdin.read(1)
+            if not char or char == "\x04":
+                raise EOFError
+            if char in ("\n", "\r"):
+                return "".join(chars)
+            if char == "\x03":
+                raise KeyboardInterrupt
+            if char in ("\x7f", "\b"):
+                if chars:
+                    chars.pop()
+                    print("\b \b", end="", flush=True)
+            elif char == "\x15":  # Ctrl+U clears the field.
+                print("\b \b" * len(chars), end="", flush=True)
+                chars.clear()
+            elif char.isprintable():
+                chars.append(char)
+                print("*", end="", flush=True)
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSANOW, original)
+        print(flush=True)
+
+
+def exchange_google_cookie(email, cookie):
+    """Exchange a browser login cookie without persisting or printing it."""
+    if not email or not cookie or "\n" in cookie or "\r" in cookie:
+        raise ValueError("Email and a single-line OAuth cookie are required")
+    import gpsoauth
+    response = gpsoauth.exchange_token(email, cookie, secrets.token_hex(8))
+    token = response.get("Token")
+    if not isinstance(token, str) or not token or "\n" in token or "\r" in token:
+        raise ValueError("Google token exchange failed")
+    return token
+
+
 def run_setup(config_path, data):
     if Path(config_path).exists():
         print("Already configured. Setup will not overwrite the existing configuration.")
@@ -100,20 +148,33 @@ def run_setup(config_path, data):
         return 1
     wizard = Wizard(config_path, data)
     print("SynoListBridge setup. Credentials will be saved in the mounted data directory.")
-    print("Use a dedicated Google account shared onto your Keep checklist and its Google master token.")
+    print("You can use your own Google account. A separate account with the checklist shared to it is optional but recommended.")
+    print("In your computer's browser, open https://accounts.google.com/EmbeddedSetup and sign in.")
+    print("Click I agree if prompted. A page that keeps loading is normal.")
+    print("Open browser developer tools (F12), then Application > Cookies (Chrome/Edge)")
+    print("or Storage > Cookies (Firefox). Select accounts.google.com and copy the oauth_token value.")
+    print("Paste only that value below, not your password. Setup will exchange it automatically.")
     try:
+        email = input("Google account email: ").strip()
+        cookie = masked_input("Google oauth_token cookie (masked): ").strip()
+        print("Connecting to Google...")
+        try:
+            token = exchange_google_cookie(email, cookie)
+        finally:
+            cookie = None
+        print("Enter the email address and password you use to sign into AnyList.")
         fields = {
-            "google_email": input("Google account email: ").strip(),
-            "google_token": getpass.getpass("Google master token (hidden): "),
-            "anylist_email": input("AnyList email: ").strip(),
-            "anylist_password": getpass.getpass("AnyList password (hidden): "),
+            "google_email": email,
+            "google_token": token,
+            "anylist_email": input("AnyList account email: ").strip(),
+            "anylist_password": masked_input("AnyList account password (masked): "),
         }
         print("Connecting accounts and finding lists...")
         wizard.discover(fields)
         selections = {key: choose_list(title, wizard.lists[key]) for key, title in
                       (("keep", "Google Keep checklist:"), ("anylist", "AnyList destination:"))}
         print("The first poll will transfer every existing unchecked, nonempty item in the selected Keep list.")
-        print("Review that list and disable any previous bridge before starting the DSM project.")
+        print("Review that list and disable any previous bridge before confirming setup.")
         if input("Save this configuration? Type yes to confirm: ").strip().lower() != "yes":
             print("Setup cancelled. No configuration saved.")
             return 1
@@ -127,5 +188,5 @@ def run_setup(config_path, data):
     finally:
         wizard.draft = None
         wizard.lists = None
-    print("Setup complete. No items transferred. Start the project in DSM Container Manager.")
+    print("Setup complete. The running DSM bridge will start automatically. If using one-off setup, start your DSM project.")
     return 0

@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -27,10 +28,30 @@ class ConfigTests(unittest.TestCase):
             return main(["--config", str(self.path), "--data", self.temp.name, *args])
 
     def test_invalid_poll_intervals_rejected(self):
-        for interval in (True, "60", 0, 29, 86401):
+        for interval in (True, "60", 0, 1, 29, -1, 604801):
             self.path.write_text(json.dumps(dict(self.data, poll_seconds=interval)))
             with self.assertRaises(ValueError):
                 Config.load(self.path)
+
+    def test_poll_environment_overrides_config(self):
+        self.path.write_text(json.dumps(dict(self.data, poll_seconds=90)))
+        for interval, seconds in (("30s", 30), ("1m", 60), ("1h", 3600), ("1d", 86400),
+                                  ("7d", 604800), ("168h", 604800),
+                                  ("10080m", 604800), ("604800s", 604800), (" 2m ", 120)):
+            with self.subTest(interval=interval), patch.dict(os.environ, {"BRIDGE_POLL_INTERVAL": interval}):
+                self.assertEqual(Config.load(self.path).poll_seconds, seconds)
+
+    def test_empty_poll_environment_preserves_config_and_default(self):
+        with patch.dict(os.environ, {"BRIDGE_POLL_INTERVAL": ""}):
+            self.assertEqual(Config.load(self.path).poll_seconds, 60)
+            self.path.write_text(json.dumps(dict(self.data, poll_seconds=90)))
+            self.assertEqual(Config.load(self.path).poll_seconds, 90)
+
+    def test_invalid_poll_environment_rejected(self):
+        for interval in ("true", "1.5m", "abc", "60", "0s", "1s", "29s", "8d", "604801s", "-1s", "1h30m", "1M", "1 m"):
+            with self.subTest(interval=interval), patch.dict(os.environ, {"BRIDGE_POLL_INTERVAL": interval}):
+                with self.assertRaisesRegex(ValueError, "BRIDGE_POLL_INTERVAL"):
+                    Config.load(self.path)
 
     def test_no_credentials_needed_for_check(self):
         self.assertEqual(self.command("check"), 0)

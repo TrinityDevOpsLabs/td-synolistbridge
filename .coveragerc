@@ -1,0 +1,7 @@
+[run]
+source = synolistbridge
+
+[report]
+fail_under = 80
+show_missing = True
+precision = 2

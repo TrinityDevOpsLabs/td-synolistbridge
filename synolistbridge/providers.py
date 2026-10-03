@@ -1,6 +1,10 @@
 # Copyright 2026 Trinity DevOps LLC
 # SPDX-License-Identifier: Apache-2.0
 import os
+import logging
+import time
+
+import requests
 from dataclasses import dataclass
 
 from .config import read_secret
@@ -52,16 +56,74 @@ class KeepSource:
 
 
 class AnyListDestination:
-    def __init__(self, config):
+    def __init__(self, config, state=None):
+        matching = os.getenv("BRIDGE_CATEGORY_MATCHING", "true").strip().lower()
+        if matching not in ("true", "false"):
+            raise ValueError("BRIDGE_CATEGORY_MATCHING must be true or false")
+        self.category_matching = matching == "true"
         from pyanylist import AnyListClient
         self.client = AnyListClient.login(config.anylist_email, read_secret(config.anylist_password_file))
         self.list_id = config.anylist_list_id
+        self.categories = {}
+        from .anylist_categories import CategoryRules
+        self.category_rules = CategoryRules(self.client, self.list_id)
+        self.state = state
+        self.refresh_seconds = getattr(config, "category_refresh_seconds", 604800)
+        self.next_refresh = 0
+        self.cache_loaded = False
+        cached = state.load_categories() if state is not None and self.category_matching else None
+        if cached:
+            refreshed, payload = cached
+            self.categories = payload["categories"]
+            self.category_rules.matches = payload["rules"]
+            self.next_refresh = refreshed + self.refresh_seconds
+            self.cache_loaded = True
 
     def lists(self):
         return [(shopping.id, shopping.name) for shopping in self.client.get_lists()]
 
+    @staticmethod
+    def category_key(text):
+        return " ".join(text.split()).casefold()
+
     def validate(self):
-        self.client.get_list_by_id(self.list_id)
+        shopping = self.client.get_list_by_id(self.list_id)
+        if not self.category_matching:
+            self.categories = {}
+            return
+        now = time.time()
+        if now < self.next_refresh:
+            return
+        try:
+            self.refresh_categories(shopping, now)
+        except (requests.RequestException, ValueError, RuntimeError):
+            if not self.cache_loaded:
+                raise
+            self.next_refresh = now + min(300, self.refresh_seconds)
+            logging.getLogger("synolistbridge").warning(
+                "Category refresh failed; using cached categories")
+
+    def refresh_categories(self, shopping, now):
+        categories = {}
+        # Favorites supply saved preferences; the selected list takes precedence.
+        # Include checked items so a previous purchase can categorize a new one.
+        for item in [*self.client.get_favourites(), *shopping.items]:
+            if item.category:
+                categories[self.category_key(item.name)] = item.category
+        self.category_rules.refresh(self.category_key)
+        if self.state is not None:
+            self.state.save_categories(now, {"categories": categories, "rules": self.category_rules.matches})
+        self.categories = categories
+        self.cache_loaded = True
+        self.next_refresh = now + self.refresh_seconds
 
     def add(self, text):
+        assignments = self.category_rules.matches.get(self.category_key(text)) if self.category_matching else None
+        if assignments:
+            return self.category_rules.add(text, assignments)
+        category = self.categories.get(self.category_key(text))
+        if category:
+            return self.client.add_item_with_details(
+                self.list_id, text, category=category
+            ).id
         return self.client.add_item(self.list_id, text).id

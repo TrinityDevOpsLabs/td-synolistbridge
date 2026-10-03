@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from synolistbridge.config import Config
-from synolistbridge.setup import Wizard, run_setup
+from synolistbridge.setup import Wizard, run_setup, exchange_google_cookie, masked_input
 
 
 class SetupTests(unittest.TestCase):
@@ -66,7 +66,8 @@ class SetupTests(unittest.TestCase):
         with patch("synolistbridge.setup.sys.stdin.isatty", return_value=True), \
              patch("synolistbridge.setup.sys.stdout.isatty", return_value=True), \
              self.interactive(["google@example.com", "any@example.com", "bad", "2", "1", "1", "yes"]), \
-             patch("synolistbridge.setup.getpass.getpass", side_effect=["PRIVATE-TOKEN", "PRIVATE-PASSWORD"]), \
+             patch("synolistbridge.setup.masked_input", side_effect=["PRIVATE-TOKEN", "PRIVATE-PASSWORD"]), \
+             patch("synolistbridge.setup.exchange_google_cookie", return_value="MASTER-TOKEN") as exchange, \
              patch("synolistbridge.setup.KeepSource") as keep, \
              patch("synolistbridge.setup.AnyListDestination") as anylist, \
              patch("sys.stdout", new_callable=io.StringIO) as output:
@@ -77,11 +78,14 @@ class SetupTests(unittest.TestCase):
             self.assertNotIn("PRIVATE", output.getvalue())
             keep.return_value.check.assert_not_called()
             anylist.return_value.add.assert_not_called()
-        self.assertEqual(Config.load(self.wizard.config_path).keep_list_id, "keep-id")
+        exchange.assert_called_once_with("google@example.com", "PRIVATE-TOKEN")
+        config = Config.load(self.wizard.config_path)
+        self.assertEqual(config.keep_list_id, "keep-id")
+        self.assertEqual(Path(config.google_token_file).read_text(), "MASTER-TOKEN")
 
     def test_noninteractive_setup_fails_before_reading_credentials(self):
         with patch("synolistbridge.setup.sys.stdin.isatty", return_value=False), \
-             patch("synolistbridge.setup.getpass.getpass") as secret:
+             patch("synolistbridge.setup.masked_input") as secret:
             self.assertEqual(run_setup(self.wizard.config_path, self.data), 1)
         secret.assert_not_called()
         self.assertFalse(self.wizard.config_path.exists())
@@ -99,3 +103,51 @@ class SetupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.wizard.save({"keep": "keep-id", "anylist": "any-id", "confirm": "yes"})
         self.assertEqual(self.wizard.config_path.read_text(), "original")
+
+class CookieExchangeTests(unittest.TestCase):
+    def test_exchange_uses_cookie_and_generated_android_id(self):
+        api = Mock()
+        api.exchange_token.return_value = {"Token": "master-secret"}
+        with patch.dict("sys.modules", {"gpsoauth": api}), \
+             patch("synolistbridge.setup.secrets.token_hex", return_value="0123456789abcdef"):
+            self.assertEqual(exchange_google_cookie("user@example.com", "cookie-secret"), "master-secret")
+        api.exchange_token.assert_called_once_with("user@example.com", "cookie-secret", "0123456789abcdef")
+
+    def test_failed_exchange_does_not_expose_provider_response(self):
+        api = Mock()
+        for response in ({"Error": "PRIVATE-COOKIE"}, {"Token": ""}, {"Token": "a\nb"}):
+            api.exchange_token.return_value = response
+            with patch.dict("sys.modules", {"gpsoauth": api}):
+                with self.assertRaises(ValueError) as error:
+                    exchange_google_cookie("user@example.com", "cookie-secret")
+            self.assertNotIn("PRIVATE", str(error.exception))
+
+class MaskedInputTests(unittest.TestCase):
+    def read_secret(self, text):
+        stream = io.StringIO(text)
+        stream.fileno = Mock(return_value=7)
+        settings = [0, 0, 0, 0, 0, 0, [0] * 32]
+        with patch("synolistbridge.setup.sys.stdin", stream), \
+             patch("synolistbridge.setup.sys.stdout", new_callable=io.StringIO) as output, \
+             patch("synolistbridge.setup.termios.tcgetattr", side_effect=[settings, [*settings[:6], list(settings[6])]]), \
+             patch("synolistbridge.setup.termios.tcsetattr") as restore:
+            try:
+                result = masked_input("Secret: ")
+            finally:
+                self.assertEqual(restore.call_count, 2)
+            return result, output.getvalue()
+
+    def test_masked_paste_and_backspace(self):
+        secret, output = self.read_secret("abc\x7fdé\n")
+        self.assertEqual(secret, "abdé")
+        self.assertNotIn("abc", output)
+        self.assertIn("***", output)
+
+    def test_clear_field(self):
+        secret, _ = self.read_secret("abc\x15xyz\n")
+        self.assertEqual(secret, "xyz")
+
+    def test_cancel_restores_terminal(self):
+        for text, error in (("abc\x03", KeyboardInterrupt), ("abc\x04", EOFError)):
+            with self.assertRaises(error):
+                self.read_secret(text)

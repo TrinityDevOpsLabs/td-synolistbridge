@@ -6,8 +6,9 @@ or mounted under `/run/secrets` for advanced setup.
 They are not stored in the transfer database. Provider clients hold account
 data and tokens in process memory while running.
 
-Use a dedicated Google account and share only the intended Keep checklist
-with it. A Google master token is not scoped to one note. Restrict access to
+A separate Google account with only the intended Keep checklist shared to it
+is recommended, but optional. You can use your own account. A Google master
+token is not scoped to one note. Restrict access to
 the project folder, secret files, configuration, database, and backups using
 DSM permissions. Do not enable verbose third-party debug logging: provider
 responses may contain account data or credentials.

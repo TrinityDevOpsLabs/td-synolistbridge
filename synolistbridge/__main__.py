@@ -92,7 +92,7 @@ def main(argv=None):
                 while not stop.is_set():
                     try:
                         if bridge is None:
-                            bridge = Bridge(KeepSource(config), AnyListDestination(config), state)
+                            bridge = Bridge(KeepSource(config), AnyListDestination(config, state), state)
                         reviews = bridge.poll()
                         temporary = Path(args.data) / "health.tmp"
                         temporary.write_text(json.dumps({"success": time.time(), "review": reviews}))

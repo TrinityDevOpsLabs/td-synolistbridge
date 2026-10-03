@@ -72,9 +72,13 @@ class ProviderTests(unittest.TestCase):
         # Verify method names against the installed native extension.
         client = Mock(spec=pyanylist.AnyListClient)
         client.add_item.return_value = SimpleNamespace(id="created-item")
+        client.get_list_by_id.return_value = SimpleNamespace(items=[])
+        client.get_favourites.return_value = []
         client.get_lists.return_value = [SimpleNamespace(id="destination", name="Shopping")]
         factory = SimpleNamespace(login=Mock(return_value=client))
-        with patch.object(pyanylist, "AnyListClient", factory):
+        with patch.object(pyanylist, "AnyListClient", factory), \
+             patch("synolistbridge.anylist_categories.CategoryRules") as rules:
+            rules.return_value.matches = {}
             destination = AnyListDestination(self.config)
             destination.validate()
             self.assertEqual(destination.lists(), [("destination", "Shopping")])
@@ -104,3 +108,110 @@ class CompletionTests(unittest.TestCase):
         with patch.dict(os.environ, {"BRIDGE_DELETE_KEEP_ITEMS": "typo"}):
             with self.assertRaises(ValueError):
                 KeepSource(SimpleNamespace())
+
+
+class CategorizationTests(unittest.TestCase):
+    def destination(self, items=(), favourites=()):
+        from unittest.mock import Mock
+        destination = AnyListDestination.__new__(AnyListDestination)
+        destination.list_id = "destination"
+        destination.categories = {}
+        destination.category_matching = True
+        destination.state = None
+        destination.refresh_seconds = 604800
+        destination.next_refresh = 0
+        destination.cache_loaded = False
+        destination.category_rules = Mock(matches={})
+        destination.client = Mock()
+        destination.client.get_list_by_id.return_value = SimpleNamespace(items=items)
+        destination.client.get_favourites.return_value = favourites
+        destination.client.add_item.return_value = SimpleNamespace(id="plain")
+        destination.client.add_item_with_details.return_value = SimpleNamespace(id="categorized")
+        return destination
+
+    def test_selected_list_overrides_favourite_and_includes_checked_items(self):
+        destination = self.destination(
+            items=[SimpleNamespace(name="Milk", category="Custom Dairy", is_checked=True)],
+            favourites=[SimpleNamespace(name="milk", category="Dairy")],
+        )
+        destination.validate()
+        self.assertEqual(destination.add("  MILK  "), "categorized")
+        destination.client.add_item_with_details.assert_called_once_with(
+            "destination", "  MILK  ", category="Custom Dairy")
+        destination.client.add_item.assert_not_called()
+
+    def test_favourites_match_case_and_whitespace(self):
+        destination = self.destination(favourites=[
+            SimpleNamespace(name="Olive Oil", category="Pantry")])
+        destination.validate()
+        self.assertEqual(destination.add("olive   oil"), "categorized")
+        destination.client.add_item_with_details.assert_called_once_with(
+            "destination", "olive   oil", category="Pantry")
+
+    def test_unknown_names_are_added_without_guessing(self):
+        destination = self.destination(items=[SimpleNamespace(name="milk", category=None)])
+        destination.validate()
+        self.assertEqual(destination.add("unknown"), "plain")
+        destination.client.add_item.assert_called_once_with("destination", "unknown")
+        destination.client.add_item_with_details.assert_not_called()
+
+    def test_category_preferences_refresh_each_poll(self):
+        destination = self.destination(items=[SimpleNamespace(name="milk", category="Dairy")])
+        destination.validate()
+        destination.client.get_list_by_id.return_value = SimpleNamespace(items=[])
+        destination.next_refresh = 0
+        destination.validate()
+        self.assertEqual(destination.add("milk"), "plain")
+
+    def test_disabled_matching_skips_favourites_and_clears_categories(self):
+        destination = self.destination(items=[SimpleNamespace(name="milk", category="Dairy")])
+        destination.categories = {"milk": "Dairy"}
+        destination.category_matching = False
+        destination.validate()
+        self.assertEqual(destination.add("milk"), "plain")
+        destination.client.get_favourites.assert_not_called()
+        destination.client.get_list_by_id.assert_called_once_with("destination")
+        destination.client.add_item_with_details.assert_not_called()
+
+    def test_invalid_matching_setting_rejected_before_login(self):
+        with patch.dict(os.environ, {"BRIDGE_CATEGORY_MATCHING": "typo"}):
+            with self.assertRaisesRegex(ValueError, "BRIDGE_CATEGORY_MATCHING"):
+                AnyListDestination(SimpleNamespace())
+
+    def test_saved_rule_used_after_item_deleted(self):
+        destination = self.destination()
+        destination.category_rules.matches = {"creama": {"group": ("dairy-id", "Dairy")}}
+        destination.category_rules.add.return_value = "saved-rule-item"
+        destination.validate()
+        self.assertEqual(destination.add("Creama"), "saved-rule-item")
+        destination.category_rules.add.assert_called_once_with(
+            "Creama", {"group": ("dairy-id", "Dairy")})
+        destination.client.add_item.assert_not_called()
+
+    def test_fresh_cache_skips_category_requests(self):
+        destination = self.destination()
+        destination.next_refresh = 200
+        with patch('synolistbridge.providers.time.time', return_value=100):
+            destination.validate()
+        destination.client.get_favourites.assert_not_called()
+        destination.category_rules.refresh.assert_not_called()
+
+    def test_refresh_failure_keeps_cache_and_delays_retry(self):
+        destination = self.destination()
+        destination.cache_loaded = True
+        destination.categories = {'milk': 'Dairy'}
+        destination.category_rules.refresh.side_effect = RuntimeError('offline')
+        with patch('synolistbridge.providers.time.time', return_value=100), \
+             self.assertLogs('synolistbridge', level='WARNING'):
+            destination.validate()
+        self.assertEqual(destination.categories, {'milk': 'Dairy'})
+        self.assertEqual(destination.next_refresh, 400)
+        with patch('synolistbridge.providers.time.time', return_value=101):
+            destination.validate()
+        self.assertEqual(destination.category_rules.refresh.call_count, 1)
+
+    def test_first_refresh_failure_is_reported(self):
+        destination = self.destination()
+        destination.category_rules.refresh.side_effect = RuntimeError('offline')
+        with self.assertRaises(RuntimeError):
+            destination.validate()

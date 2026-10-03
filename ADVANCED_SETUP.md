@@ -27,7 +27,11 @@
 
 ### Google authentication
 
-Obtain a master token as described in the [README](README.md#google-authentication).
+The interactive [README setup](README.md#google-authentication) exchanges a
+browser cookie automatically. For this manual-file configuration, obtain the
+master token using the [upstream token exchange instructions](https://github.com/simon-weber/gpsoauth#alternative-flow).
+The `google_master_token` file must contain the resulting master token, not
+the browser cookie.
 
 ### Discover and select the lists
 
