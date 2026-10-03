@@ -79,6 +79,7 @@ class ProviderTests(unittest.TestCase):
         with patch.object(pyanylist, "AnyListClient", factory), \
              patch("synolistbridge.anylist_categories.CategoryRules") as rules:
             rules.return_value.matches = {}
+            rules.return_value.builtin_matches = {}
             destination = AnyListDestination(self.config)
             destination.validate()
             self.assertEqual(destination.lists(), [("destination", "Shopping")])
@@ -121,7 +122,7 @@ class CategorizationTests(unittest.TestCase):
         destination.refresh_seconds = 604800
         destination.next_refresh = 0
         destination.cache_loaded = False
-        destination.category_rules = Mock(matches={})
+        destination.category_rules = Mock(matches={}, builtin_matches={})
         destination.client = Mock()
         destination.client.get_list_by_id.return_value = SimpleNamespace(items=items)
         destination.client.get_favourites.return_value = favourites
@@ -215,3 +216,28 @@ class CategorizationTests(unittest.TestCase):
         destination.category_rules.refresh.side_effect = RuntimeError('offline')
         with self.assertRaises(RuntimeError):
             destination.validate()
+
+    def test_builtin_used_when_no_custom_match_exists(self):
+        destination = self.destination()
+        destination.category_rules.builtin_matches = {'cottage cheese': {'group': ('dairy', 'Dairy')}}
+        destination.category_rules.add.return_value = 'builtin-item'
+        self.assertEqual(destination.add('Cottage Cheese'), 'builtin-item')
+        destination.category_rules.add.assert_called_once_with(
+            'Cottage Cheese', {'group': ('dairy', 'Dairy')})
+        destination.client.add_item.assert_not_called()
+
+    def test_custom_saved_rule_overrides_builtin(self):
+        destination = self.destination()
+        destination.category_rules.matches = {'milk': {'group': ('custom', 'Custom')}}
+        destination.category_rules.builtin_matches = {'milk': {'group': ('dairy', 'Dairy')}}
+        destination.add('Milk')
+        destination.category_rules.add.assert_called_once_with('Milk', {'group': ('custom', 'Custom')})
+
+    def test_disabled_matching_skips_builtin_and_legacy_matches(self):
+        destination = self.destination()
+        destination.category_matching = False
+        destination.categories = {'milk': 'Dairy'}
+        destination.category_rules.builtin_matches = {'milk': {'group': ('dairy', 'Dairy')}}
+        self.assertEqual(destination.add('Milk'), 'plain')
+        destination.category_rules.add.assert_not_called()
+        destination.client.add_item_with_details.assert_not_called()

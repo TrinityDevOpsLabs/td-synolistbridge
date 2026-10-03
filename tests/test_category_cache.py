@@ -37,3 +37,31 @@ class CategoryCacheTests(unittest.TestCase):
                 with patch.dict(os.environ, {'BRIDGE_CATEGORY_REFRESH_INTERVAL': value}):
                     with self.assertRaisesRegex(ValueError, 'BRIDGE_CATEGORY_REFRESH_INTERVAL'):
                         Config.load(path)
+
+    def test_restart_reuses_builtin_cache_and_upgrades_old_cache(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from synolistbridge.providers import AnyListDestination
+        with tempfile.TemporaryDirectory() as directory:
+            secret = Path(directory) / 'secret'
+            secret.write_text('test-secret')
+            config = SimpleNamespace(anylist_email='test', anylist_password_file=str(secret),
+                                     anylist_list_id='destination', category_refresh_seconds=604800)
+            state = State(directory, {'list': 'destination'})
+            self.addCleanup(state.close)
+            payload = {'version': 2, 'rules': {}, 'categories': {},
+                       'builtin_rules': {'cottage cheese': {'group': ['dairy', 'Dairy']}}}
+            state.save_categories(100, payload)
+            client = Mock()
+            module = SimpleNamespace(AnyListClient=SimpleNamespace(login=Mock(return_value=client)))
+            with patch.dict('sys.modules', {'pyanylist': module}), \
+                 patch.dict(os.environ, {'BRIDGE_CATEGORY_MATCHING': 'true'}):
+                destination = AnyListDestination(config, state)
+                with patch('synolistbridge.providers.time.time', return_value=101):
+                    destination.validate()
+                self.assertEqual(destination.category_rules.builtin_matches, payload['builtin_rules'])
+                client.get_favourites.assert_not_called()
+                state.save_categories(100, {'rules': {}, 'categories': {}})
+                upgraded = AnyListDestination(config, state)
+                self.assertEqual(upgraded.next_refresh, 0)
+                self.assertTrue(upgraded.cache_loaded)

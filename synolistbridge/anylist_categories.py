@@ -73,6 +73,7 @@ class CategoryRules:
         self.list_id = list_id
         self.client_id = uuid.uuid4().hex
         self.matches = {}
+        self.builtin_matches = {}
 
     def post(self, endpoint, payload):
         # The native client handles token refresh during validate() before this.
@@ -93,6 +94,7 @@ class CategoryRules:
         data = fields(self.post("data/user-data/get", b""))
         shopping = fields(data.get(1, [b""])[0])
         matches = {}
+        system_categories = {}
         for raw in shopping.get(6, []):
             response = fields(raw)
             if string(response, 1) != self.list_id:
@@ -100,17 +102,30 @@ class CategoryRules:
             groups = {}
             for group_raw in response.get(7, []):
                 group = fields(fields(group_raw).get(1, [b""])[0])
-                groups[string(group, 1)] = {
-                    string(category, 1): string(category, 5)
-                    for category in map(fields, group.get(5, []))
-                }
+                group_id = string(group, 1)
+                groups[group_id] = {}
+                for category in map(fields, group.get(5, [])):
+                    category_id, category_name = string(category, 1), string(category, 5)
+                    groups[group_id][category_id] = category_name
+                    system = string(category, 7)
+                    if system and category_id and category_name:
+                        system_categories.setdefault(system, {})[group_id] = (category_id, category_name)
             for rule in map(fields, response.get(13, [])):
                 group_id, category_id = string(rule, 4), string(rule, 6)
                 name = string(rule, 5)
                 category = groups.get(group_id, {}).get(category_id)
                 if name and category:
                     matches.setdefault(key(name), {})[group_id] = (category_id, category)
+        # Download the same public grocery-name index used by AnyList Web.
+        # Map its stable system categories to this list's IDs and display names,
+        # including renamed built-in categories and multiple category groups.
+        response = requests.get(
+            "https://www.anylist.com/static/webapp/data/tag_data.json", timeout=30)
+        response.raise_for_status()
+        builtin_matches = builtin_categories(response.json(), system_categories, key)
+        # Publish both snapshots together only after all reads succeed.
         self.matches = matches
+        self.builtin_matches = builtin_matches
 
     def add(self, name, assignments):
         item_id = uuid.uuid4().hex
@@ -126,3 +141,18 @@ class CategoryRules:
                      + field(3, item_id) + field(6, item))
         self.post("data/shopping-lists/update", field(1, operation))
         return item_id
+
+
+def builtin_categories(data, system_categories, key):
+    tags = data.get("tags")
+    names = data.get("normalizedDisplayNamesIndex")
+    if not isinstance(tags, dict) or not isinstance(names, dict) or not tags or not names:
+        raise ValueError("Invalid AnyList grocery database")
+    matches = {}
+    for name, tag_id in names.items():
+        tag = tags.get(tag_id, {})
+        root = tag.get("rootCategory", tag_id)
+        assignments = system_categories.get(root)
+        if assignments:
+            matches[key(name)] = assignments
+    return matches

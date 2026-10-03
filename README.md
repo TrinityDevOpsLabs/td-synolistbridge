@@ -10,14 +10,22 @@ after an item is deleted. For example, a saved rule for Creama → Dairy applies
 when Creama is transferred again. Matching ignores capitalization and extra
 whitespace and supports assignments to multiple category groups. If no saved
 rule exists, the bridge reuses the category of a matching current list item
-(including checked items), then a matching favorite. Names without any match
-remain uncategorized; this does not provide AnyList's built-in grocery dictionary.
+(including checked items), then a matching favorite. If there is no saved match, it uses AnyList's
+[built-in grocery database](https://www.anylist.com/static/webapp/data/tag_data.json)
+to match known grocery names and aliases to the list's built-in categories.
+For example, Cottage Cheese maps to Dairy and Bacon maps to Meat. AnyList's
+database maps Cheese Sticks to Frozen Foods (String Cheese maps to Dairy).
+Custom saved rules take precedence, and renamed built-in categories retain
+their names. Matching uses complete names, ignoring capitalization and extra
+whitespace; arbitrary descriptions and names absent from the database may
+remain uncategorized.
 
-Category rules and fallback matches are cached in `transfers.sqlite3` for the
+Saved rules, built-in grocery matches, and fallback matches are cached in `transfers.sqlite3` for the
 configured account/list route. Set `BRIDGE_CATEGORY_REFRESH_INTERVAL=7d` in
 `.env` to control refresh frequency (default **7 days**). It accepts the same
 `30s`–`7d` duration range as polling. A fresh cache survives restarts; a missing
-or expired cache refreshes on the next poll. Successful refreshes replace old
+or expired cache refreshes on the next poll. Older caches refresh once after
+upgrading to populate built-in matches. Successful refreshes replace old
 rules, including removed rules. If a refresh fails, the bridge keeps using the
 cache and retries after at most five minutes. Category changes in AnyList may
 take up to the refresh interval to apply. Refreshes happen during polling, so a

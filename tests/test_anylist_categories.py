@@ -1,9 +1,9 @@
 # Copyright 2026 Trinity DevOps LLC
 # SPDX-License-Identifier: Apache-2.0
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from synolistbridge.anylist_categories import CategoryRules, field, fields, string
+from synolistbridge.anylist_categories import CategoryRules, builtin_categories, field, fields, string
 
 
 class CategoryRuleTests(unittest.TestCase):
@@ -16,10 +16,16 @@ class CategoryRuleTests(unittest.TestCase):
         other = field(1, 'other-list') + field(13, rule)
         rules = CategoryRules(Mock(), 'destination')
         rules.post = Mock(return_value=field(1, field(6, response) + field(6, other)))
-        rules.refresh(str.casefold)
+        with patch("synolistbridge.anylist_categories.requests.get") as get:
+            get.return_value.json.return_value = {"tags": {"milk": {"rootCategory": "dairy"}},
+                                                 "normalizedDisplayNamesIndex": {"milk": "milk"}}
+            rules.refresh(str.casefold)
         self.assertEqual(rules.matches, {'creama': {'group': ('dairy', 'Dairy')}})
         rules.post.return_value = b''
-        rules.refresh(str.casefold)
+        with patch("synolistbridge.anylist_categories.requests.get") as get:
+            get.return_value.json.return_value = {"tags": {"milk": {"rootCategory": "dairy"}},
+                                                 "normalizedDisplayNamesIndex": {"milk": "milk"}}
+            rules.refresh(str.casefold)
         self.assertEqual(rules.matches, {})
 
     def test_add_sends_modern_assignments_for_all_groups(self):
@@ -41,3 +47,25 @@ class CategoryRuleTests(unittest.TestCase):
         for payload in (b'\x0a\x03x', b'\x80', b'\x00', b'\x0b'):
             with self.subTest(payload=payload), self.assertRaises(ValueError):
                 fields(payload)
+
+    def test_builtin_catalog_maps_system_ids_and_renamed_groups(self):
+        data = {'tags': {'cottage-cheese': {'rootCategory': 'dairy'},
+                         'bacon': {'rootCategory': 'meat'},
+                         'cheese-sticks': {'rootCategory': 'frozen-foods'},
+                         'unknown': {}},
+                'normalizedDisplayNamesIndex': {'cottage cheese': 'cottage-cheese',
+                                                'bacon': 'bacon', 'cheese sticks': 'cheese-sticks',
+                                                'unknown': 'unknown'}}
+        systems = {'dairy': {'first': ('dairy-id', 'Chilled'), 'second': ('dairy-2', 'Dairy')},
+                   'meat': {'first': ('meat-id', 'Meat')},
+                   'frozen-foods': {'first': ('frozen-id', 'Frozen Foods')}}
+        matches = builtin_categories(data, systems, str.casefold)
+        self.assertEqual(matches['cottage cheese'], systems['dairy'])
+        self.assertEqual(matches['bacon'], systems['meat'])
+        self.assertEqual(matches['cheese sticks'], systems['frozen-foods'])
+        self.assertNotIn('unknown', matches)
+
+    def test_invalid_catalog_is_rejected(self):
+        for data in ({}, {'tags': {}, 'normalizedDisplayNamesIndex': {}}, {'tags': []}):
+            with self.assertRaises(ValueError):
+                builtin_categories(data, {}, str.casefold)
