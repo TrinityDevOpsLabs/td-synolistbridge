@@ -63,11 +63,17 @@ class Wizard:
     def save(self, fields):
         if self.draft is None or fields.get("confirm") != "yes":
             raise ValueError("Confirm first transfer")
-        for key in ("keep", "anylist"):
-            if fields[key] not in {item_id for item_id, _ in self.lists[key]}:
-                raise ValueError("Invalid list selection")
+        pairs = fields.get("lists") or [{"keep_list_id": fields["keep"], "anylist_list_id": fields["anylist"]}]
+        sources = set()
+        for pair in pairs:
+            for key, field in (("keep", "keep_list_id"), ("anylist", "anylist_list_id")):
+                if pair[field] not in {item_id for item_id, _ in self.lists[key]}:
+                    raise ValueError("Invalid list selection")
+            if pair["keep_list_id"] in sources:
+                raise ValueError("Each Keep checklist may appear only once")
+            sources.add(pair["keep_list_id"])
         config = Config(self.draft["google_email"].strip(), self.draft["anylist_email"].strip(),
-                        fields["keep"], fields["anylist"],
+                        lists=pairs,
                         google_token_file=str(self.data / "secrets/google_master_token"),
                         anylist_password_file=str(self.data / "secrets/anylist_password"))
         if self.config_path.exists():
@@ -171,14 +177,36 @@ def run_setup(config_path, data):
         }
         print("Connecting accounts and finding lists...")
         wizard.discover(fields)
-        selections = {key: choose_list(title, wizard.lists[key]) for key, title in
-                      (("keep", "Google Keep checklist:"), ("anylist", "AnyList destination:"))}
-        print("The first poll will transfer every existing unchecked, nonempty item in the selected Keep list.")
-        print("Review that list and disable any previous bridge before confirming setup.")
-        if input("Save this configuration? Type yes to confirm: ").strip().lower() != "yes":
+        print("Create list pairs: each Keep checklist sends items only to its selected AnyList destination.")
+        print("All pairs use these same accounts and shared polling settings.")
+        print("Only selected Keep checklists are processed. AnyList changes are not copied back to Keep.")
+        print("You will review every pair before anything is saved or transferred.")
+        pairs = []
+        while True:
+            available = [item for item in wizard.lists["keep"]
+                         if item[0] not in {pair["keep_list_id"] for pair in pairs}]
+            print(f"Choose list pair {len(pairs) + 1}:")
+            keep_id = choose_list("Keep source checklist (unchecked items will be transferred):", available)
+            any_id = choose_list("AnyList destination for this checklist:", wizard.lists["anylist"])
+            pairs.append({"keep_list_id": keep_id, "anylist_list_id": any_id})
+            if len(pairs) == len(wizard.lists["keep"]):
+                break
+            if input("Add another list pair? Type yes, or press Enter to finish: ").strip().lower() != "yes":
+                break
+        print(f"Review all {len(pairs)} list pair(s) (Keep source → AnyList destination):")
+        for number, pair in enumerate(pairs, 1):
+            names = [next(name for item_id, name in wizard.lists[key] if item_id == pair[field])
+                     for key, field in (("keep", "keep_list_id"), ("anylist", "anylist_list_id"))]
+            names = ["".join(c if c.isprintable() else " " for c in str(name)) for name in names]
+            print(f"  {number}. {names[0]} → {names[1]}")
+        print("The first poll transfers ALL existing unchecked, nonempty items from EVERY selected Keep checklist.")
+        print("Delivered items are checked off in Keep, or deleted if BRIDGE_DELETE_KEEP_ITEMS=true.")
+        print("Setup saves configuration only. The running bridge starts transfers immediately after setup finishes.")
+        print("Review every source checklist and disable any previous bridge before confirming.")
+        if input("Save all list pairs and allow transfers? Type yes to confirm: ").strip().lower() != "yes":
             print("Setup cancelled. No configuration saved.")
             return 1
-        wizard.save(dict(selections, confirm="yes"))
+        wizard.save({"lists": pairs, "confirm": "yes"})
     except (EOFError, KeyboardInterrupt):
         print("\nSetup cancelled. No configuration saved.")
         return 1

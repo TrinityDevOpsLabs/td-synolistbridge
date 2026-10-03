@@ -18,14 +18,15 @@ class Item:
 
 
 class KeepSource:
-    def __init__(self, config):
+    def __init__(self, config, client=None):
         delete = os.getenv("BRIDGE_DELETE_KEEP_ITEMS", "false").strip().lower()
         if delete not in ("true", "false"):
             raise ValueError("BRIDGE_DELETE_KEEP_ITEMS must be true or false")
         self.delete_items = delete == "true"
         import gkeepapi
-        self.keep = gkeepapi.Keep()
-        self.keep.authenticate(config.google_email, read_secret(config.google_token_file))
+        self.keep = client if client is not None else gkeepapi.Keep()
+        if client is None:
+            self.keep.authenticate(config.google_email, read_secret(config.google_token_file))
         self.list_id = config.keep_list_id
 
     def lists(self):
@@ -56,13 +57,14 @@ class KeepSource:
 
 
 class AnyListDestination:
-    def __init__(self, config, state=None):
+    def __init__(self, config, state=None, client=None):
         matching = os.getenv("BRIDGE_CATEGORY_MATCHING", "true").strip().lower()
         if matching not in ("true", "false"):
             raise ValueError("BRIDGE_CATEGORY_MATCHING must be true or false")
         self.category_matching = matching == "true"
         from pyanylist import AnyListClient
-        self.client = AnyListClient.login(config.anylist_email, read_secret(config.anylist_password_file))
+        self.client = client if client is not None else AnyListClient.login(
+            config.anylist_email, read_secret(config.anylist_password_file))
         self.list_id = config.anylist_list_id
         self.categories = {}
         from .anylist_categories import CategoryRules

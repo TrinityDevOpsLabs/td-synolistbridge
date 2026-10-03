@@ -42,8 +42,8 @@ class SetupTests(unittest.TestCase):
         self.discover()
         self.wizard.save({"keep": "keep-id", "anylist": "any-id", "confirm": "yes"})
         config = Config.load(self.wizard.config_path)
-        self.assertEqual(config.keep_list_id, "keep-id")
-        self.assertEqual(config.anylist_list_id, "any-id")
+        self.assertEqual(config.routes()[0].keep_list_id, "keep-id")
+        self.assertEqual(config.routes()[0].anylist_list_id, "any-id")
         self.assertEqual(Path(config.google_token_file).read_text(), "PRIVATE-TOKEN")
         self.assertEqual(Path(config.anylist_password_file).read_text(), "PRIVATE-PASSWORD")
         for path in (self.wizard.config_path, Path(config.google_token_file), Path(config.anylist_password_file)):
@@ -80,8 +80,28 @@ class SetupTests(unittest.TestCase):
             anylist.return_value.add.assert_not_called()
         exchange.assert_called_once_with("google@example.com", "PRIVATE-TOKEN")
         config = Config.load(self.wizard.config_path)
-        self.assertEqual(config.keep_list_id, "keep-id")
+        self.assertEqual(config.routes()[0].keep_list_id, "keep-id")
         self.assertEqual(Path(config.google_token_file).read_text(), "MASTER-TOKEN")
+
+    def test_multiple_pairs_are_reviewed_before_save(self):
+        with patch("synolistbridge.setup.sys.stdin.isatty", return_value=True), \
+             patch("synolistbridge.setup.masked_input", side_effect=["COOKIE", "PASSWORD"]), \
+             patch("synolistbridge.setup.exchange_google_cookie", return_value="TOKEN"), \
+             patch("builtins.input", side_effect=["google", "anylist", "1", "1", "yes", "1", "2", "yes"]), \
+             patch("synolistbridge.setup.KeepSource") as keep, \
+             patch("synolistbridge.setup.AnyListDestination") as anylist, \
+             patch("sys.stdout", new_callable=io.StringIO) as output:
+            output.isatty = Mock(return_value=True)
+            keep.return_value.lists.return_value = [("groceries", "Groceries"), ("hardware", "Hardware")]
+            anylist.return_value.lists.return_value = [("food", "Food"), ("tools", "Tools")]
+            self.assertEqual(run_setup(self.wizard.config_path, self.data), 0)
+            self.assertIn("Groceries → Food", output.getvalue())
+            self.assertIn("Hardware → Tools", output.getvalue())
+            self.assertIn("EVERY selected Keep checklist", output.getvalue())
+            anylist.return_value.add.assert_not_called()
+        routes = Config.load(self.wizard.config_path).routes()
+        self.assertEqual([(r.keep_list_id, r.anylist_list_id) for r in routes],
+                         [("groceries", "food"), ("hardware", "tools")])
 
     def test_noninteractive_setup_fails_before_reading_credentials(self):
         with patch("synolistbridge.setup.sys.stdin.isatty", return_value=False), \

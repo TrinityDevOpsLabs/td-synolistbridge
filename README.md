@@ -1,6 +1,6 @@
 # 🛒 SynoListBridge
 
-Copies unchecked items from a Google Keep shopping checklist to AnyList,
+Copies unchecked items from one or more Google Keep checklists to paired AnyList lists,
 then checks them off in Keep by default. Runs on your Synology NAS through Container
 Manager.
 
@@ -102,8 +102,8 @@ published.**
 ## Set up in DSM
 
 **Before you finish setup:** the bridge will copy **all existing unchecked
-items** from your chosen Keep checklist. Check off or remove anything you do
-not want copied. Stop any other bridge using that list.
+items** from every selected Keep checklist. Check off or remove anything you do
+not want copied. Stop any other bridge using those lists.
 
 1. **Copy the project to your NAS.** In File Station, put the project folder
    in your Docker shared folder, for example `/volume1/docker/SynoListBridge`.
@@ -124,17 +124,31 @@ not want copied. Stop any other bridge using that list.
    synolistbridge setup
    ```
 
-5. **Answer the setup questions.** Enter your Google email and paste the
-   `oauth_token` cookie copied above. For **AnyList account email**, enter the
-   email address you use to sign into AnyList. For **AnyList account password**,
-   enter that account's password. These are your AnyList login details; they
-   may differ from your Google login. Use an AnyList account that can access
-   the destination shopping list. Select each list by its number.
-   Passwords and cookies show `*` characters while you type or paste; their
-   actual values stay hidden. Use Backspace to correct an entry. Review the selected Keep list before typing `yes` to save.
-6. **Check that it works.** The bridge starts automatically after setup finishes.
-   Add a new test item to Keep. Within about a minute, it should appear in
-   AnyList and become checked in Keep (or disappear if deletion is enabled).
+5. **Sign into both accounts.** Enter your Google email and paste the
+   `oauth_token` cookie copied above. Enter the email and password you use to
+   sign into AnyList; these may differ from your Google login. Credentials are
+   entered once and shared by all list pairs. Cookies and passwords show `*`
+   while you type or paste. Use Backspace to correct an entry.
+6. **Choose where each checklist sends its items.** Select a Keep source
+   checklist by its number, then select the AnyList destination for that
+   checklist. For example, Keep **Groceries** → AnyList **Weekly Shopping**.
+   Type `yes` at **Add another list pair?** to select another source and
+   destination, or press Enter to finish. Each Keep checklist can be selected
+   once. Several sources may share an AnyList destination. Unselected Keep
+   checklists are not processed. Pairing sends items from Keep to AnyList;
+   changes made in AnyList are not copied back to Keep.
+7. **Review and confirm all pairs.** Setup shows every Keep source → AnyList
+   destination before asking **Save all list pairs and allow transfers?**
+   Check this summary and every source checklist. The first poll copies
+   **all existing unchecked, nonempty items from every selected source**.
+   Successfully delivered items are checked off in Keep by default, or deleted
+   if `BRIDGE_DELETE_KEEP_ITEMS=true`. Type `yes` to save, or anything else to
+   cancel without saving. Setup itself sends no items, but the already running
+   container begins transfers automatically after setup finishes.
+8. **Check each pair.** Add a test item to each selected Keep checklist and
+   confirm it appears in its paired AnyList destination, then becomes checked
+   in Keep (or disappears if deletion is enabled). The default polling interval
+   is one minute; a custom `BRIDGE_POLL_INTERVAL` changes that timing.
 
 You do not need a web page or a separate image-build command. Once running,
 you can close the terminal.
@@ -212,3 +226,43 @@ total statement coverage across `synolistbridge` must be at least **80%**.
 The coverage XML report is available as the `coverage-report` workflow artifact.
 To enforce this before merging, configure a GitHub branch ruleset or branch
 protection rule requiring the `test` status check.
+
+## Multiple list pairs
+
+Setup signs into one Google account and one AnyList account, then asks you to
+select a **Keep source checklist** and its **AnyList destination**. Choose
+"Add another list pair" to repeat, then review the full list of pairs before
+confirming. Each source appears only once; several sources can share a destination.
+Items go only to their paired destination. Setup itself does not transfer items,
+but the running container starts transfers immediately after configuration is saved.
+The first poll transfers **every existing unchecked, nonempty item in every
+selected Keep checklist**, then checks off or deletes each delivered item according
+to `BRIDGE_DELETE_KEEP_ITEMS`. Review all source lists before confirming.
+
+All pairs share `BRIDGE_POLL_INTERVAL` and `BRIDGE_CATEGORY_REFRESH_INTERVAL`.
+Each polling cycle processes pairs in order. A provider failure in one pair does
+not prevent the others from being processed. Transfer history and category caches
+are isolated per pair in SQLite under `data/routes/`. Existing single-list
+configurations and their original database remain supported; converting an existing
+pair to the array format retains its original transfer history.
+
+For manual configuration, replace the top-level `keep_list_id` and
+`anylist_list_id` fields with:
+
+```json
+"lists": [
+  {"keep_list_id": "KEEP_GROCERIES_ID", "anylist_list_id": "ANYLIST_GROCERIES_ID"},
+  {"keep_list_id": "KEEP_HARDWARE_ID", "anylist_list_id": "ANYLIST_HARDWARE_ID"}
+]
+```
+
+To change pairs later, stop the container, back up and edit its `config.json`,
+then restart. Keep credentials and data intact. Newly added pairs transfer all
+existing unchecked source items on their first poll. Removing a pair stops its
+processing and retains its database; restoring that same pair reuses its history.
+A different destination is a new route and can transfer remaining unchecked items
+again. Do not rerun initial setup or delete databases to change pairs.
+
+`status` includes source/destination IDs for array configurations. If a transfer ID
+appears in multiple routes, resolve it with
+`synolistbridge resolve --keep-list-id KEEP_ID ITEM_ID delivered` (or `retry`/`skip`).

@@ -161,3 +161,8 @@ Existing installations using a Compose-generated volume name must keep that
 volume: before upgrading, set `BRIDGE_VOLUME_NAME` in `.env` to its actual
 Docker volume name (find it in the existing container's mounts). The new
 fixed default name does not migrate an older volume automatically.
+
+For multiple Keep → AnyList pairs, replace the two top-level list IDs with a
+`lists` array as shown in [Multiple list pairs](README.md#multiple-list-pairs).
+Review every source checklist before starting: the first poll transfers all
+existing unchecked items from every configured pair.
