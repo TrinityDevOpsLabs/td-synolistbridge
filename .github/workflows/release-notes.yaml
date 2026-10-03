@@ -1,0 +1,50 @@
+name: Release notes from commits
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to update (also supports saved drafts)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-notes-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Generate notes and create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 .github/scripts/release_notes.py "$RELEASE_TAG" "$GH_REPO" "$NOTES_FILE"
+          if [ "$EVENT_NAME" = push ]; then
+            # A pushed tag prepares a draft; publication remains a manual choice.
+            releases=$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[].tag_name')
+            if printf '%s\n' "$releases" | grep -Fxq -- "$RELEASE_TAG"; then
+              gh release edit "$RELEASE_TAG" --notes-file "$NOTES_FILE"
+            else
+              gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file "$NOTES_FILE"
+            fi
+          else
+            gh release edit "$RELEASE_TAG" --notes-file "$NOTES_FILE"
+          fi

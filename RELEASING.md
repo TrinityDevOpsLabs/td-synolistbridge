@@ -14,8 +14,7 @@ tag or publish the parent repository as a SynoListBridge release.
 - Increment **MINOR** for backwards-compatible features.
 - Increment **PATCH** for backwards-compatible fixes and documentation updates.
 
-Keep `synolistbridge/__init__.py`'s `__version__`, the dated changelog section,
-and the release tag consistent. The initial planned version is `0.1.0`.
+Keep `synolistbridge/__init__.py`'s `__version__` and the release tag consistent. The initial planned version is `0.1.0`.
 
 ## Publish a release
 
@@ -41,9 +40,8 @@ and the release tag consistent. The initial planned version is `0.1.0`.
    checks pass for both `linux/amd64` and `linux/arm64`. Test the browser wizard
    and a real Keep → AnyList transfer on a supported NAS before publishing.
    Validation commands above do not start a bridge or modify real accounts.
-3. Update `__version__`. Move completed entries in `CHANGELOG.md` from
-   `Unreleased` into a dated version section, for example
-   `## [0.1.0] - YYYY-MM-DD`. Use the actual release date.
+3. Update `__version__`. Release descriptions are generated from commit
+   messages automatically; updating `CHANGELOG.md` is optional.
 4. Commit the release changes on the default branch.
 5. Create a signed tag when Git signing is configured:
 
@@ -64,11 +62,14 @@ and the release tag consistent. The initial planned version is `0.1.0`.
    git push origin v0.1.0
    ```
 
-7. On GitHub, draft a release from the tag, generate release notes, review
-   them, attach any intended assets, and publish it. The automatic source
-   ZIP and `tar.gz` archives include the Dockerfile, Compose configurations,
-   application, and notices. Users can build those sources in Container Manager.
-   Do not attach populated data volumes or configured account files.
+7. Pushing a version tag automatically creates a draft release with notes from
+   commit messages. Open that draft on GitHub, review the notes, attach any
+   intended assets, and publish it. If you create and publish a release directly
+   through GitHub, the workflow fills its description after publication.
+   The automatic source ZIP and `tar.gz` archives include the Dockerfile,
+   Compose configurations, application, and notices. Users can build those
+   sources in Container Manager. Do not attach populated data volumes or
+   configured account files.
 8. Mark unstable versions such as `v0.2.0-rc.1` as prereleases.
 
 Never move or reuse a published version tag. Enable immutable releases in the
@@ -78,10 +79,31 @@ the file alone does not enforce approvals.
 
 ## Release assets and images
 
-The included GitHub workflow validates code and builds container images for
-both architectures. It does not create releases or push registry images,
-matching the Jellyfin utility's manually reviewed release process. Release
-notes are categorized using `.github/release.yml` and pull-request labels.
+The CI workflow validates code and builds container images for both
+architectures without pushing registry images.
+
+`.github/workflows/release-notes.yaml` generates descriptions from every commit
+since the nearest reachable earlier `v*` version tag, including direct pushes
+and merged pull requests. The first release includes the full commit history.
+`feat:`, `fix:`, and `docs:` commit subjects are grouped into Added, Fixed, and
+Documentation; other commits appear under Other changes. Commit links and a
+full changelog link are included. These are commit summaries, so descriptive
+commit messages make useful release notes; the workflow does not summarize diffs.
+
+Pushing a version tag creates a draft release automatically or updates its
+existing release. Publishing a release regenerates the notes for both stable
+releases and prereleases. Direct branch pushes alone do not create releases.
+The workflow replaces the entire description; manual edits will be overwritten
+on publication or another run. `CHANGELOG.md` does not need to be updated.
+
+Commit and push the workflow and script to the default branch before use, and
+include the workflow in future release tags. To backfill an existing release
+or saved draft, run **Release notes from commits** manually from the Actions tab
+with its tag. No tag needs to be moved. Check the Actions run if notes do not
+appear after pushing a tag or publishing a release.
+
+`.github/release.yml` remains available for GitHub's optional **Generate release
+notes** button, which categorizes merged pull requests using labels.
 
 If publishing prebuilt images later, tie them to the same immutable release
 version and include both supported architectures and third-party notices.
