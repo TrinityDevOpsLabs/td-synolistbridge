@@ -1,20 +1,20 @@
-# Browser setup with Docker-managed storage; no local credential files needed.
+# Start the DSM project, then run setup in the container terminal.
 services:
   synolistbridge:
     build: .
     image: synolistbridge:local
     command: [start]
     restart: unless-stopped
+    user: "${BRIDGE_UID:-1000}:${BRIDGE_GID:-1000}"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     stop_grace_period: 60s
     environment:
+      BRIDGE_DELETE_KEEP_ITEMS: "${BRIDGE_DELETE_KEEP_ITEMS:-false}"
       BRIDGE_CONFIG: /data/config.json
-    ports:
-      - "8765:8765"
     volumes:
-      - bridge_data:/data
+      - ${BRIDGE_DATA_SOURCE:-bridge_data}:/data
     tmpfs:
       - /tmp:size=16m,mode=1777
     healthcheck:
@@ -25,3 +25,4 @@ services:
       retries: 3
 volumes:
   bridge_data:
+    name: ${BRIDGE_VOLUME_NAME:-synolistbridge_data}

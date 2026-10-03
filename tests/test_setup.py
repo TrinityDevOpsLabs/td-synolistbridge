@@ -3,12 +3,11 @@
 import io
 import tempfile
 import unittest
-from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from synolistbridge.config import Config
-from synolistbridge.setup import Wizard, handler_for
+from synolistbridge.setup import Wizard, run_setup
 
 
 class SetupTests(unittest.TestCase):
@@ -30,11 +29,6 @@ class SetupTests(unittest.TestCase):
         self.discover()
         self.assertFalse(self.wizard.config_path.exists())
         self.assertFalse((self.data / "secrets").exists())
-        page = self.wizard.page()
-        self.assertNotIn("PRIVATE-TOKEN", page)
-        self.assertNotIn("PRIVATE-PASSWORD", page)
-        self.assertNotIn("<script>", page)
-        self.assertIn("&lt;script&gt;", page)
 
     def test_save_requires_valid_lists_and_confirmation(self):
         self.discover()
@@ -65,34 +59,39 @@ class SetupTests(unittest.TestCase):
                 self.wizard.discover(self.fields)
         self.assertIsNone(self.wizard.draft)
 
-    def request(self, path, origin=None, body=b"x=y", content_type="application/x-www-form-urlencoded"):
-        handler_type = handler_for(self.wizard)
-        handler = handler_type.__new__(handler_type)
-        handler.path = path
-        handler.headers = Message()
-        handler.headers["Host"] = "nas.local:8765"
-        handler.headers["Content-Type"] = content_type
-        handler.headers["Content-Length"] = str(len(body))
-        if origin:
-            handler.headers["Origin"] = origin
-        handler.rfile = io.BytesIO(body)
-        handler.respond = Mock()
-        handler.do_POST()
-        return handler.respond.call_args.args
+    def interactive(self, answers):
+        return patch("builtins.input", side_effect=answers)
 
-    def test_wrong_token_and_foreign_origin_are_rejected(self):
-        self.assertEqual(self.request("/wrong-token/discover")[0], 404)
-        self.assertEqual(self.request(self.wizard.base + "discover", "http://evil.example")[0], 403)
+    def test_interactive_setup_saves_without_transfers(self):
+        with patch("synolistbridge.setup.sys.stdin.isatty", return_value=True), \
+             patch("synolistbridge.setup.sys.stdout.isatty", return_value=True), \
+             self.interactive(["google@example.com", "any@example.com", "bad", "2", "1", "1", "yes"]), \
+             patch("synolistbridge.setup.getpass.getpass", side_effect=["PRIVATE-TOKEN", "PRIVATE-PASSWORD"]), \
+             patch("synolistbridge.setup.KeepSource") as keep, \
+             patch("synolistbridge.setup.AnyListDestination") as anylist, \
+             patch("sys.stdout", new_callable=io.StringIO) as output:
+            output.isatty = Mock(return_value=True)
+            keep.return_value.lists.return_value = [("keep-id", "Groceries")]
+            anylist.return_value.lists.return_value = [("any-id", "Shopping")]
+            self.assertEqual(run_setup(self.wizard.config_path, self.data), 0)
+            self.assertNotIn("PRIVATE", output.getvalue())
+            keep.return_value.check.assert_not_called()
+            anylist.return_value.add.assert_not_called()
+        self.assertEqual(Config.load(self.wizard.config_path).keep_list_id, "keep-id")
 
-    def test_wrong_encoding_and_large_body_are_rejected(self):
-        self.assertEqual(self.request(self.wizard.base + "discover", content_type="application/json")[0], 415)
-        self.assertEqual(self.request(self.wizard.base + "discover", body=b"x" * 16385)[0], 413)
+    def test_noninteractive_setup_fails_before_reading_credentials(self):
+        with patch("synolistbridge.setup.sys.stdin.isatty", return_value=False), \
+             patch("synolistbridge.setup.getpass.getpass") as secret:
+            self.assertEqual(run_setup(self.wizard.config_path, self.data), 1)
+        secret.assert_not_called()
+        self.assertFalse(self.wizard.config_path.exists())
 
-    def test_provider_errors_are_not_reflected(self):
-        with patch.object(self.wizard, "discover", side_effect=RuntimeError("PRIVATE-TOKEN")):
-            status, body = self.request(self.wizard.base + "discover", "http://nas.local:8765")
-        self.assertEqual(status, 400)
-        self.assertNotIn("PRIVATE-TOKEN", body)
+    def test_cancellation_does_not_save(self):
+        with patch("synolistbridge.setup.sys.stdin.isatty", return_value=True), \
+             patch("synolistbridge.setup.sys.stdout.isatty", return_value=True), \
+             patch("builtins.input", side_effect=EOFError):
+            self.assertEqual(run_setup(self.wizard.config_path, self.data), 1)
+        self.assertFalse(self.wizard.config_path.exists())
 
     def test_saved_config_cannot_be_overwritten(self):
         self.discover()

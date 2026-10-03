@@ -30,7 +30,8 @@ and the release tag consistent. The initial planned version is `0.1.0`.
    .venv/bin/python -m compileall -q synolistbridge
    .venv/bin/python -m synolistbridge --help
    .venv/bin/python -m synolistbridge --config config.example.json check
-   docker compose -f compose.easy.yaml config --quiet
+   docker compose -f docker-compose.yml config --quiet
+   docker compose -f docker-compose.advanced.yml config --quiet
    docker build -t synolistbridge:release-check .
    docker run --rm synolistbridge:release-check --help
    ```

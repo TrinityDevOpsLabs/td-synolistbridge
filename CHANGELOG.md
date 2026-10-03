@@ -1,10 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Replace browser setup with a one-time interactive `setup` command.
+- Remove the setup port and use the fixed `synolistbridge_data` volume by default.
+
+
 Notable changes to this project are documented here.
 
 The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+### Changed
+
+- Use `docker-compose.yml` for the default DSM browser setup. Rename the
+  local-file configuration to `docker-compose.advanced.yml` and document
+  replacing the default file before creating an advanced DSM project.
 
 ### Added
 

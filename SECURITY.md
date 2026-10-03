@@ -1,7 +1,8 @@
 # Security
 
 SynoListBridge stores transfer IDs, item text, and destination IDs in a local
-SQLite database. Credentials are read from files mounted under `/run/secrets`.
+SQLite database. Credentials are read from files under `/data/secrets` for interactive setup,
+or mounted under `/run/secrets` for advanced setup.
 They are not stored in the transfer database. Provider clients hold account
 data and tokens in process memory while running.
 
@@ -17,14 +18,10 @@ local configuration and runtime directories. Configured paths and list names
 can also expose private account information.
 
 The container runs without root by default, uses a read-only root filesystem,
-drops Linux capabilities. The advanced configuration publishes no network ports.
-The easy configuration publishes HTTP port 8765 for a one-time browser wizard.
-Its URL contains a random access token printed in startup logs. Protect that
-link and those logs, perform setup only on a trusted private LAN, and never
-forward the port from your router. The setup listener closes after configuration
-is saved. Configured restarts run the bridge without reopening the wizard.
-Wizard-created files have mode 0600 in the private Docker-managed volume;
-backups of that volume contain account credentials.
+and drops Linux capabilities. Neither configuration publishes network ports.
+Interactive setup reads tokens and passwords with hidden terminal prompts;
+run it from a trusted terminal. Setup-created files have mode 0600 in the
+private Docker-managed volume; backups of that volume contain account credentials.
 
 For the advanced configuration, use a dedicated
 UID/GID with only the folder permissions it needs. Local Compose secrets are

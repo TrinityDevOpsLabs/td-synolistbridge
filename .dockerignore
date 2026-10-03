@@ -1,9 +1,24 @@
-.git
-.env
-config.json
-secrets
-data
-tests
-__pycache__
-**/__pycache__
-.venv
+# Send only files required by Dockerfile to the Docker build context.
+# This also excludes .env files, credentials, custom data folders, Git metadata,
+# tests, documentation, editor settings, and local virtual environments.
+**
+
+!Dockerfile
+!.dockerignore
+!requirements.txt
+!bin/
+!bin/synolistbridge
+!synolistbridge/
+!synolistbridge/**
+!LICENSE
+!NOTICE
+!THIRD_PARTY_NOTICES.md
+!licenses/
+!licenses/**
+
+# Keep generated Python artifacts out of the included application directory.
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/

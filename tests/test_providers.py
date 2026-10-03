@@ -1,5 +1,6 @@
 # Copyright 2026 Trinity DevOps LLC
 # SPDX-License-Identifier: Apache-2.0
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,21 @@ class ProviderTests(unittest.TestCase):
                     authenticate.assert_called_once_with("google@example.com", "test-secret")
                     self.assertEqual(sync.call_count, 2)
 
+    def test_keep_deletes_only_selected_item(self):
+        keep = gkeepapi.Keep()
+        note = keep.createList("Shopping", [("milk", False), ("bread", False)])
+        self.config.keep_list_id = note.id
+        with patch.dict(os.environ, {"BRIDGE_DELETE_KEEP_ITEMS": "true"}), \
+             patch.object(keep, "authenticate"), patch.object(keep, "sync") as sync, \
+             patch("gkeepapi.Keep", return_value=keep):
+            source = KeepSource(self.config)
+            milk = next(item for item in note.items if item.text == "milk")
+            source.complete(milk.id)
+            self.assertTrue(milk.deleted)
+            self.assertFalse(note.deleted)
+            self.assertEqual([item.text for item in source.items()], ["bread"])
+            self.assertEqual(sync.call_count, 2)
+
     def test_keep_rejects_plain_notes(self):
         keep = gkeepapi.Keep()
         self.config.keep_list_id = keep.createNote("Not a checklist", "milk").id
@@ -69,3 +85,22 @@ class ProviderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class CompletionTests(unittest.TestCase):
+    def test_completion_deletes_and_propagates_sync_failure(self):
+        from unittest.mock import Mock
+        source = KeepSource.__new__(KeepSource)
+        source.delete_items = True
+        item = Mock(id="item", deleted=False)
+        source.note = Mock(return_value=SimpleNamespace(items=[item]))
+        source.keep = Mock()
+        source.keep.sync.side_effect = RuntimeError("offline")
+        with self.assertRaises(RuntimeError):
+            source.complete("item")
+        item.delete.assert_called_once_with()
+        source.keep.sync.assert_called_once_with()
+
+    def test_invalid_delete_setting_rejected_before_authentication(self):
+        with patch.dict(os.environ, {"BRIDGE_DELETE_KEEP_ITEMS": "typo"}):
+            with self.assertRaises(ValueError):
+                KeepSource(SimpleNamespace())

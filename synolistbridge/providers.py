@@ -1,5 +1,6 @@
 # Copyright 2026 Trinity DevOps LLC
 # SPDX-License-Identifier: Apache-2.0
+import os
 from dataclasses import dataclass
 
 from .config import read_secret
@@ -14,6 +15,10 @@ class Item:
 
 class KeepSource:
     def __init__(self, config):
+        delete = os.getenv("BRIDGE_DELETE_KEEP_ITEMS", "false").strip().lower()
+        if delete not in ("true", "false"):
+            raise ValueError("BRIDGE_DELETE_KEEP_ITEMS must be true or false")
+        self.delete_items = delete == "true"
         import gkeepapi
         self.keep = gkeepapi.Keep()
         self.keep.authenticate(config.google_email, read_secret(config.google_token_file))
@@ -38,7 +43,10 @@ class KeepSource:
 
     def complete(self, item_id):
         item = next(item for item in self.note().items if item.id == item_id and not item.deleted)
-        item.checked = True
+        if self.delete_items:
+            item.delete()
+        else:
+            item.checked = True
         # On failure the CLI discards this client; a fresh poll verifies remote state.
         self.keep.sync()
 

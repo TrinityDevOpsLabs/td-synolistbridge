@@ -22,11 +22,11 @@ def route(config):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="SynoListBridge by Trinity DevOps LLC")
+    parser = argparse.ArgumentParser(prog="synolistbridge", description="SynoListBridge by Trinity DevOps LLC")
     parser.add_argument("--config", default=os.getenv("BRIDGE_CONFIG", "/config/config.json"))
     parser.add_argument("--data", default=os.getenv("BRIDGE_DATA", "/data"))
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("start", "run", "once", "discover", "status", "check", "health"):
+    for command in ("setup", "start", "run", "once", "discover", "status", "check", "health"):
         commands.add_parser(command)
     resolve = commands.add_parser("resolve")
     resolve.add_argument("item_id")
@@ -41,14 +41,29 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     try:
+        if args.command == "setup":
+            from .setup import run_setup
+            with exclusive_lock(args.data):
+                return run_setup(args.config, args.data)
         if args.command == "start":
             if not Path(args.config).exists():
-                from .setup import run_setup
-                with exclusive_lock(args.data):
-                    run_setup(args.config, args.data, stop)
-                if stop.is_set():
+                logger = logging.getLogger("synolistbridge")
+                logger.info("Waiting for configuration / setup to be completed. "
+                            "Open this container's Terminal in DSM Container Manager, launch /bin/sh, "
+                            "and run: synolistbridge setup")
+                # Do not hold the data lock: the terminal setup process needs it.
+                while not Path(args.config).exists():
+                    if stop.wait(2):
+                        return 0
+                logger.info("Configuration saved. Starting bridge after setup releases the data lock.")
+                # Setup publishes configuration just before releasing its lock.
+                # Give that process time to exit; restart policy handles contention.
+                if stop.wait(1):
                     return 0
             args.command = "run"
+        if not Path(args.config).exists():
+            print("Configuration missing. Run the interactive setup command with the same data mount first.", file=sys.stderr)
+            return 1
         config = Config.load(args.config)
         if args.command == "check":
             print("Configuration is valid; credentials and connectivity were not checked.")

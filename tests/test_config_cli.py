@@ -35,7 +35,7 @@ class ConfigTests(unittest.TestCase):
     def test_no_credentials_needed_for_check(self):
         self.assertEqual(self.command("check"), 0)
 
-    def test_start_with_saved_config_skips_wizard(self):
+    def test_start_with_saved_config_skips_setup(self):
         event = unittest.mock.Mock()
         event.is_set.side_effect = [False, True]
         with patch("synolistbridge.__main__.threading.Event", return_value=event), \
@@ -48,14 +48,42 @@ class ConfigTests(unittest.TestCase):
         wizard.assert_not_called()
         bridge.return_value.poll.assert_called_once()
 
-    def test_start_can_stop_cleanly_during_initial_setup(self):
+    def test_start_waits_without_lock_and_stops_cleanly(self):
         self.path.unlink()
-        def stop_setup(config, data, stop):
-            stop.set()
-        with patch("synolistbridge.setup.run_setup", side_effect=stop_setup) as wizard:
+        event = unittest.mock.Mock()
+        event.wait.return_value = True
+        with patch("synolistbridge.__main__.threading.Event", return_value=event), \
+             patch("synolistbridge.__main__.exclusive_lock") as lock, \
+             self.assertLogs("synolistbridge", level="INFO") as logs:
             self.assertEqual(self.command("start"), 0)
-        wizard.assert_called_once()
-        self.assertFalse(self.path.exists())
+        lock.assert_not_called()
+        self.assertIn("synolistbridge setup", " ".join(logs.output))
+
+    def test_start_runs_after_setup_saves_config(self):
+        saved = self.path.read_text()
+        self.path.unlink()
+        event = unittest.mock.Mock()
+        def wait(seconds):
+            if seconds == 2:
+                self.path.write_text(saved)
+            return False
+        event.wait.side_effect = wait
+        event.is_set.side_effect = [False, True]
+        with patch("synolistbridge.__main__.threading.Event", return_value=event), \
+             patch("synolistbridge.providers.KeepSource"), \
+             patch("synolistbridge.providers.AnyListDestination"), \
+             patch("synolistbridge.__main__.Bridge") as bridge:
+            bridge.return_value.poll.return_value = 0
+            self.assertEqual(self.command("start"), 0)
+        bridge.return_value.poll.assert_called_once()
+
+    def test_setup_returns_without_starting_bridge(self):
+        self.path.unlink()
+        with patch("synolistbridge.setup.run_setup", return_value=0) as setup, \
+             patch("synolistbridge.__main__.Bridge") as bridge:
+            self.assertEqual(self.command("setup"), 0)
+        setup.assert_called_once_with(str(self.path), self.temp.name)
+        bridge.assert_not_called()
 
     def test_invalid_config_fails_safely(self):
         self.path.write_text('{"secret": "do-not-log-this"}')

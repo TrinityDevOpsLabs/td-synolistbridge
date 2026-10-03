@@ -80,6 +80,22 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.destination.sent, ["milk"])
         self.assertTrue(self.source.current["a"].checked)
 
+    def test_deletion_failure_retries_without_resending(self):
+        from unittest.mock import Mock
+        def delete(item_id):
+            del self.source.current[item_id]
+        self.source.complete = Mock(side_effect=RuntimeError("Keep unavailable"))
+        with self.assertRaises(RuntimeError):
+            self.bridge.poll()
+        self.assertEqual(self.state.get("a")["status"], "delivered")
+        self.restart()
+        self.source.complete.side_effect = delete
+        self.bridge.poll()
+        self.bridge.poll()
+        self.assertEqual(self.destination.sent, ["milk"])
+        self.assertNotIn("a", self.source.current)
+        self.assertEqual(self.state.get("a")["status"], "done")
+
     def test_uncertain_delivery_requires_review(self):
         self.destination.fail_add = True
         self.assertEqual(self.bridge.poll(), 1)

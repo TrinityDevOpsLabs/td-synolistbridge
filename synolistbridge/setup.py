@@ -1,15 +1,13 @@
 # Copyright 2026 Trinity DevOps LLC
 # SPDX-License-Identifier: Apache-2.0
-"""One-time browser setup. The HTTP listener closes before transfers start."""
-import html
+"""One-time interactive terminal setup; never performs transfers."""
+import getpass
+import sys
 import json
 import os
-import secrets
 import tempfile
 from dataclasses import asdict
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
 
 from .config import Config
 from .providers import KeepSource, AnyListDestination
@@ -34,13 +32,8 @@ class Wizard:
     def __init__(self, config_path, data):
         self.config_path = Path(config_path)
         self.data = Path(data)
-        self.token = secrets.token_urlsafe(32)
         self.draft = None
         self.lists = None
-
-    @property
-    def base(self):
-        return f"/{self.token}/"
 
     def discover(self, fields):
         self.draft = None
@@ -85,106 +78,54 @@ class Wizard:
         self.draft = None
         self.lists = None
 
-    def page(self, message=""):
-        esc = html.escape
-        if self.draft is None:
-            form = f'''<form method="post" action="{self.base}discover">
-            <label>Google account email<input name="google_email" type="email" required></label>
-            <label>Google master token<input name="google_token" type="password" autocomplete="off" required></label>
-            <p>Use a dedicated Google account shared onto your shopping checklist.
-            Obtain its master token using the
-            <a href="https://github.com/simon-weber/gpsoauth#alternative-flow" target="_blank" rel="noreferrer">gpsoauth guide</a>.</p>
-            <label>AnyList email<input name="anylist_email" type="email" required></label>
-            <label>AnyList password<input name="anylist_password" type="password" autocomplete="off" required></label>
-            <button>Connect accounts and find lists</button></form>'''
-        else:
-            selections = ""
-            for key, title in (("keep", "Google Keep checklist"), ("anylist", "AnyList destination")):
-                options = ''.join(f'<option value="{esc(str(item_id), quote=True)}">{esc(name)}</option>'
-                                  for item_id, name in self.lists[key])
-                selections += f'<label>{title}<select name="{key}">{options}</select></label>'
-            form = f'''<form method="post" action="{self.base}save">{selections}
-            <p>The first poll will transfer every unchecked item in the selected Keep checklist.
-            Disable any previous bridge for that list before continuing.</p>
-            <label><input class="check" type="checkbox" name="confirm" value="yes" required>
-            I have reviewed the Keep list and want to start transferring its unchecked items.</label>
-            <button>Save and start bridge</button></form>'''
-        return f'''<!doctype html><html lang="en"><meta charset="utf-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>SynoListBridge setup</title><style>
-        body{{font:16px system-ui;max-width:600px;margin:40px auto;padding:0 20px;color:#182333}}
-        label{{display:block;margin:20px 0}}input,select,button{{box-sizing:border-box;width:100%;padding:12px;font:inherit}}
-        .check{{width:auto}}button{{background:#174e85;color:white;border:0;border-radius:6px;cursor:pointer}}
-        p{{line-height:1.5}}.message{{color:#9c241e}}
-        </style><h1>SynoListBridge</h1><p>Trinity DevOps LLC · DSM setup</p>
-        <p>Use this setup page only on your trusted private network. Credentials are stored privately in the app data volume.</p>
-        <p class="message">{esc(message)}</p>{form}</html>'''
+def choose_list(title, lists):
+    print(title)
+    for number, (_, name) in enumerate(lists, 1):
+        # Provider names may contain terminal control characters.
+        safe_name = "".join(char if char.isprintable() else " " for char in str(name))
+        print(f"  {number}. {safe_name}")
+    while True:
+        selection = input("Select list number: ").strip()
+        if selection.isascii() and selection.isdigit() and 1 <= int(selection) <= len(lists):
+            return lists[int(selection) - 1][0]
+        print("Enter one of the listed numbers.")
 
 
-def handler_for(wizard):
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass  # The URL contains a setup access token.
-
-        def respond(self, status, body):
-            encoded = body.encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(encoded)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
-            self.end_headers()
-            self.wfile.write(encoded)
-
-        def do_GET(self):
-            if self.path != wizard.base:
-                return self.respond(404, "Use the private setup link from Container Manager logs.")
-            self.respond(200, wizard.page())
-
-        def do_POST(self):
-            if self.path not in (wizard.base + "discover", wizard.base + "save"):
-                return self.respond(404, "Unknown setup page")
-            origin = self.headers.get("Origin")
-            host = self.headers.get("Host")
-            if origin and (urlsplit(origin).scheme not in ("http", "https") or urlsplit(origin).netloc != host):
-                return self.respond(403, "Origin rejected")
-            if self.headers.get("Content-Type", "").split(";")[0] != "application/x-www-form-urlencoded":
-                return self.respond(415, "Form encoding required")
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 16384:
-                    return self.respond(413, "Form too large")
-                raw = self.rfile.read(length).decode("utf-8")
-                values = parse_qs(raw, strict_parsing=True, max_num_fields=10)
-                if any(len(value) != 1 for value in values.values()):
-                    raise ValueError("Duplicate fields")
-                fields = {key: value[0] for key, value in values.items()}
-                if self.path.endswith("discover"):
-                    wizard.discover(fields)
-                    self.respond(200, wizard.page())
-                else:
-                    wizard.save(fields)
-                    self.respond(200, "<h1>Setup complete</h1><p>SynoListBridge is starting. This setup listener will close. View progress in Container Manager logs.</p>")
-            except Exception:
-                # Do not reflect provider errors, request bodies, or credentials.
-                self.respond(400, wizard.page("Setup could not be completed. Check credentials, list access, and your selections, then try again."))
-
-    return Handler
-
-
-class SetupServer(HTTPServer):
-    def get_request(self):
-        connection, address = super().get_request()
-        connection.settimeout(10)
-        return connection, address
-
-
-def run_setup(config_path, data, stop, port=8765):
+def run_setup(config_path, data):
+    if Path(config_path).exists():
+        print("Already configured. Setup will not overwrite the existing configuration.")
+        return 1
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print("Setup requires an interactive terminal. Use docker run --rm -it with your data volume.")
+        return 1
     wizard = Wizard(config_path, data)
-    with SetupServer(("0.0.0.0", port), handler_for(wizard)) as server:
-        server.timeout = 1
-        print(f"Setup required. Open http://YOUR-NAS-IP:{port}{wizard.base} on your private network.", flush=True)
-        while not stop.is_set() and not Path(config_path).exists():
-            server.handle_request()
+    print("SynoListBridge setup. Credentials will be saved in the mounted data directory.")
+    print("Use a dedicated Google account shared onto your Keep checklist and its Google master token.")
+    try:
+        fields = {
+            "google_email": input("Google account email: ").strip(),
+            "google_token": getpass.getpass("Google master token (hidden): "),
+            "anylist_email": input("AnyList email: ").strip(),
+            "anylist_password": getpass.getpass("AnyList password (hidden): "),
+        }
+        print("Connecting accounts and finding lists...")
+        wizard.discover(fields)
+        selections = {key: choose_list(title, wizard.lists[key]) for key, title in
+                      (("keep", "Google Keep checklist:"), ("anylist", "AnyList destination:"))}
+        print("The first poll will transfer every existing unchecked, nonempty item in the selected Keep list.")
+        print("Review that list and disable any previous bridge before starting the DSM project.")
+        if input("Save this configuration? Type yes to confirm: ").strip().lower() != "yes":
+            print("Setup cancelled. No configuration saved.")
+            return 1
+        wizard.save(dict(selections, confirm="yes"))
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled. No configuration saved.")
+        return 1
+    except Exception as exc:
+        print(f"Setup failed ({type(exc).__name__}). Check credentials, list access, and data permissions; then rerun setup.")
+        return 1
+    finally:
+        wizard.draft = None
+        wizard.lists = None
+    print("Setup complete. No items transferred. Start the project in DSM Container Manager.")
+    return 0
