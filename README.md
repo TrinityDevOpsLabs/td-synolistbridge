@@ -1,199 +1,193 @@
 # 🛒 SynoListBridge
 
-Copies unchecked items from one or more Google Keep checklists to paired AnyList lists,
-then checks them off in Keep by default. Runs on your Synology NAS through Container
-Manager.
+Send shopping items from Google Keep to AnyList using your Synology NAS.
 
-Category matching is enabled by default. The bridge reads AnyList's saved
-category rules for the destination list, so remembered categories still apply
-after an item is deleted. For example, a saved rule for Creama → Dairy applies
-when Creama is transferred again. Matching ignores capitalization and extra
-whitespace and supports assignments to multiple category groups. If no saved
-rule exists, the bridge reuses the category of a matching current list item
-(including checked items), then a matching favorite. If there is no saved match, it uses AnyList's
-[built-in grocery database](https://www.anylist.com/static/webapp/data/tag_data.json)
-to match known grocery names and aliases to the list's built-in categories.
-For example, Cottage Cheese maps to Dairy and Bacon maps to Meat. AnyList's
-database maps Cheese Sticks to Frozen Foods (String Cheese maps to Dairy).
-Custom saved rules take precedence, and renamed built-in categories retain
-their names. Matching uses complete names, ignoring capitalization and extra
-whitespace; arbitrary descriptions and names absent from the database may
-remain uncategorized.
+Add an item to a Google Keep checklist, either yourself or through Google Home.
+SynoListBridge copies it to the AnyList list you choose, then checks it off in
+Keep. It checks for new items every minute by default.
 
-Saved rules, built-in grocery matches, and fallback matches are cached in `transfers.sqlite3` for the
-configured account/list route. Set `BRIDGE_CATEGORY_REFRESH_INTERVAL=7d` in
-`.env` to control refresh frequency (default **7 days**). It accepts the same
-`30s`–`7d` duration range as polling. A fresh cache survives restarts; a missing
-or expired cache refreshes on the next poll. Older caches refresh once after
-upgrading to populate built-in matches. Successful refreshes replace old
-rules, including removed rules. If a refresh fails, the bridge keeps using the
-cache and retries after at most five minutes. Category changes in AnyList may
-take up to the refresh interval to apply. Refreshes happen during polling, so a
-longer poll interval can delay them further. Normal list validation still occurs
-each poll; category caching reduces additional category and favorites requests.
+- Connect one or more Keep checklists to AnyList lists.
+- Use AnyList's remembered categories and built-in grocery categories.
+- Shared-list members can receive AnyList's list-change notifications when their
+  notification settings allow them.
+- Choose whether delivered items are checked off or deleted in Keep.
 
-Set `BRIDGE_CATEGORY_MATCHING=false` in `.env` to disable category matching;
-items will then be added without an explicit category. Accepted values are
-`true` and `false`. Recreate the container after changing either setting.
+**Items move from Keep to AnyList only.** Changes in AnyList are not copied back
+to Keep.
 
-The poll interval defaults to **1 minute (60 seconds)**. Set
-`BRIDGE_POLL_INTERVAL=2m` in `.env` to poll every two minutes. Use a whole number
-followed by `s` (seconds), `m` (minutes), `h` (hours), or `d` (days), such as
-`30s`, `1m`, `1h`, or `1d`. The minimum is `30s` and the maximum is `7d` (also
-`168h`, `10080m`, or `604800s`). Bare numbers, decimals, and combined durations
-such as `1h30m` are rejected. This replaces `BRIDGE_POLL_SECONDS` and overrides
-`poll_seconds` in `config.json`, which remains a numeric value in seconds.
-An unset or empty variable uses the configuration file's value. Rebuild and
-recreate the container to apply these changes:
+By **Trinity DevOps LLC**. This project uses unofficial Google and AnyList
+connections and is not affiliated with Google, AnyList, or Synology.
+
+## What you need
+
+- A Synology NAS with **Container Manager** installed (x86-64 or ARM64).
+- Internet access on the NAS.
+- A Google Keep **checklist**, rather than a plain text note.
+- A Google account that can access that checklist.
+- An AnyList account that can edit your destination list, and its email and password.
+- A computer with a browser for the one-time sign-in steps.
+
+You can use different accounts for Google Keep and AnyList.
+If you use Google Home or a Nest speaker, first check that your voice commands
+add items to the Keep checklist you want. SynoListBridge does not configure your
+speaker.
+
+## Set up on your Synology NAS
+
+**Before starting:** check off or remove any Keep items you do not want copied.
+Once setup finishes, the bridge copies **all unchecked items from every checklist
+you select**. Stop any other bridge using those lists.
+
+### 1. Copy the project to your NAS
+
+Put the project folder in your Docker shared folder using File Station, for
+example `/volume1/docker/SynoListBridge`. Your NAS may use a different volume.
+Keep the project files together, including `Dockerfile` and `docker-compose.yml`.
+
+Leave the storage settings at their defaults for the easiest setup. Docker will
+keep your account details and transfer history in persistent storage called
+`synolistbridge_data`. To use a regular NAS folder instead, follow
+[the data-folder instructions](ADVANCED_SETUP.md#store-data-in-a-nas-folder).
+
+### 2. Start the project
+
+Open **Container Manager → Project → Create**. Choose a project name, select the
+folder you copied, and use the included `docker-compose.yml`. Build and start
+the project. This may take a few minutes.
+
+### 3. Open setup
+
+Select the running **synolistbridge** container and open **Terminal**. Launch
+`/bin/sh`, then type:
 
 ```sh
-docker compose up -d --build
+synolistbridge setup
 ```
 
-By **Trinity DevOps LLC**.
+Setup asks for your Google email, a Google sign-in value, and your AnyList email
+and password. The next section explains how to get the Google sign-in value.
 
-## Before you start
+### 4. Sign into Google
 
-You will need:
+You can use your own Google account. A separate Google account is optional but
+recommended: the saved sign-in token gives broad access to that account. If you
+use a separate account, share your Keep checklist with it first.
 
-- A Synology NAS with Container Manager installed (x86-64 or ARM64).
-- Internet access on the NAS.
-- A Google Keep checklist and an AnyList list.
-- Your Google account email and access to sign in through a web browser.
-- The email address and password you use to sign into your AnyList account.
+On your computer:
 
-### Google authentication
-
-**You can use your own Google account.** If the checklist is already in that
-account, you do not need to share it with anyone.
-
-A separate Google account is **optional but recommended** because the master
-token gives broad access to the account. If you choose a separate account,
-share only your shopping checklist with it.
-
-Setup gets the master token for you. You only need to copy a temporary
-login cookie from your browser:
-
-1. On your computer, open [Google's sign-in page](https://accounts.google.com/EmbeddedSetup)
-   and sign into the Google account you will use for the bridge.
-2. Click **I agree** if prompted. If the page keeps loading, continue anyway.
-3. Open your browser's developer tools (usually **F12** or **Ctrl+Shift+I**).
-   In Chrome or Edge, select **Application → Cookies**. In Firefox, select
+1. Open [Google's sign-in page](https://accounts.google.com/EmbeddedSetup) and sign
+   into the Google account you chose for the bridge.
+2. Click **I agree** if asked. If the page keeps loading, continue with the steps below.
+3. Open browser developer tools with **F12** or **Ctrl+Shift+I**.
+4. In Chrome or Edge, open **Application → Cookies**. In Firefox, open
    **Storage → Cookies**.
-4. Select **accounts.google.com**, find **oauth_token**, and copy its **Value**.
-   Keep it private and paste it only into the setup prompt in step 5 below.
+5. Select **accounts.google.com**, find **oauth_token**, and copy its **Value**.
+6. Paste that value into the container's setup prompt when requested.
 
-You do not need to download another project or run a token-conversion command.
-The app exchanges the cookie automatically and saves the master token; it does
-not save the browser cookie. Neither a Google password nor an app password
-should be entered into that prompt.
+Keep this value private. Use the cookie value in that prompt, rather than your
+Google password or an app password. Setup converts it into a saved sign-in token
+for you; it does not save the browser cookie. Passwords and cookies appear as `*`
+while you enter them.
 
-This uses the unofficial [gpsoauth login flow](https://github.com/simon-weber/gpsoauth#alternative-flow).
-Company policies may block it. If the cookie is missing or login fails, follow
-that guide for troubleshooting rather than changing your account's security settings.
+If the cookie is missing or sign-in fails, see the
+[Google sign-in troubleshooting guide](https://github.com/simon-weber/gpsoauth#alternative-flow).
+Work or school account policies may prevent this sign-in method.
 
-If you use Google/Nest voice commands, check that they add items to the right
-Keep checklist before setting up the bridge. This app does not change your
-speaker settings. Its connections to Google and AnyList use unofficial clients.
+### 5. Choose your lists
 
-**This project is still in development; the first stable release has not been
-published.**
+Enter your AnyList email and password when asked. Then select a Keep checklist
+and the AnyList list that should receive its items. For example:
 
-## Set up in DSM
+**Keep “Groceries” → AnyList “Weekly Shopping”**
 
-**Before you finish setup:** the bridge will copy **all existing unchecked
-items** from every selected Keep checklist. Check off or remove anything you do
-not want copied. Stop any other bridge using those lists.
+To connect another checklist, answer `yes` to **Add another list pair?**
+Otherwise, press Enter. Each Keep checklist can be selected once; several
+checklists can send items to the same AnyList list. Unselected checklists are
+left alone. All selected lists use the same Google and AnyList accounts.
 
-1. **Copy the project to your NAS.** In File Station, put the project folder
-   in your Docker shared folder, for example `/volume1/docker/SynoListBridge`.
-   Use your NAS's actual volume if it is different. Keep all project files
-   together, including `Dockerfile` and `docker-compose.yml`.
-2. **Choose where to save data.** For the easiest setup, leave the storage
-   settings alone; Docker manages the data for you. If you want an ordinary
-   NAS folder instead, follow [the data-folder instructions](ADVANCED_SETUP.md#store-data-in-a-nas-folder)
-   first. Keep your `.env` file in the project folder.
-3. **Create the project.** Open **Container Manager → Project → Create**.
-   Give it a name, select the copied project folder, and use the included
-   `docker-compose.yml`. Build and start the project. This may take a few minutes.
-4. **Open the container terminal.** Select the running `synolistbridge`
-   container in Container Manager and open **Terminal**. Launch `/bin/sh`
-   to open a command prompt, then enter:
+Review the list choices, then answer `yes` to
+**Save all list pairs and allow transfers?** Setup saves your choices, and the
+running container begins copying items automatically.
 
-   ```sh
-   synolistbridge setup
-   ```
+### 6. Test it
 
-5. **Sign into both accounts.** Enter your Google email and paste the
-   `oauth_token` cookie copied above. Enter the email and password you use to
-   sign into AnyList; these may differ from your Google login. Credentials are
-   entered once and shared by all list pairs. Cookies and passwords show `*`
-   while you type or paste. Use Backspace to correct an entry.
-6. **Choose where each checklist sends its items.** Select a Keep source
-   checklist by its number, then select the AnyList destination for that
-   checklist. For example, Keep **Groceries** → AnyList **Weekly Shopping**.
-   Type `yes` at **Add another list pair?** to select another source and
-   destination, or press Enter to finish. Each Keep checklist can be selected
-   once. Several sources may share an AnyList destination. Unselected Keep
-   checklists are not processed. Pairing sends items from Keep to AnyList;
-   changes made in AnyList are not copied back to Keep.
-7. **Review and confirm all pairs.** Setup shows every Keep source → AnyList
-   destination before asking **Save all list pairs and allow transfers?**
-   Check this summary and every source checklist. The first poll copies
-   **all existing unchecked, nonempty items from every selected source**.
-   Successfully delivered items are checked off in Keep by default, or deleted
-   if `BRIDGE_DELETE_KEEP_ITEMS=true`. Type `yes` to save, or anything else to
-   cancel without saving. Setup itself sends no items, but the already running
-   container begins transfers automatically after setup finishes.
-8. **Check each pair.** Add a test item to each selected Keep checklist and
-   confirm it appears in its paired AnyList destination, then becomes checked
-   in Keep (or disappears if deletion is enabled). The default polling interval
-   is one minute; a custom `BRIDGE_POLL_INTERVAL` changes that timing.
+Add a new test item to each selected Keep checklist. Within about a minute, it
+should appear in the AnyList list you chose and become checked off in Keep.
 
-You do not need a web page or a separate image-build command. Once running,
-you can close the terminal.
+For shared AnyList lists, also check that another member receives a notification.
+They need shared-list change notifications enabled in AnyList and permission for
+AnyList to show notifications on their phone.
 
-## If something goes wrong
-
-- **The log says “Waiting for configuration / setup to be completed.”**
-  The container is ready for setup. Open its terminal and run the command in step 4.
-- **The container says “unhealthy” before setup is finished.** This is expected.
-  It should become healthy after setup and the first successful sync.
-- **You cancelled setup or entered the wrong credentials.** Run the setup command
-  again. It will not replace a configuration that has already been saved.
-- **You see `PermissionError` while using a NAS data folder.** Check the folder
-  permissions and account settings in the [data-folder instructions](ADVANCED_SETUP.md#store-data-in-a-nas-folder).
-- **The test item does not arrive.** Check the container's Log tab and see
-  [Operations and troubleshooting](OPERATIONS.md).
-
-## Optional: remove delivered items from Keep
-
-By default, delivered items are checked off in Keep. To delete them instead,
-add this line to `.env` in your project folder:
-
-```dotenv
-BRIDGE_DELETE_KEEP_ITEMS=true
-```
-
-Recreate the container through your DSM project to apply the change. Use
-`false` to return to checking items off. This removes individual items after
-successful delivery, leaving the Keep list intact. Items with uncertain
-delivery remain in Keep for review. Previously completed items are unaffected.
+You can now close the terminal. The container keeps running on your NAS.
 
 ## Everyday use
 
-Manage start, stop, and logs in Container Manager. To request an item again,
-create a **new item** in Keep. Editing or unchecking an item already delivered
-will not send it again.
+Use Container Manager to start or stop the bridge and view its **Log** tab.
 
-**Back up the data folder or Docker volume.** It contains your credentials and
-transfer history. Deleting it can lose setup and cause items to be copied again.
-See [backup and upgrade instructions](OPERATIONS.md#backup-and-upgrades).
+To request an item again, create a **new item** in Keep. Editing or unchecking
+an item that was already delivered will not send it again.
 
-For optional SSH setup commands, custom storage, or configuration files, see
-[Advanced setup](ADVANCED_SETUP.md).
+**Back up the bridge's saved data.** It includes your sign-in details and the
+record of items already copied. Deleting it can lose your setup and cause items
+to be sent again. See [backup and upgrade instructions](OPERATIONS.md#backup-and-upgrades).
 
-## 🛠️ Development
+To change which lists are connected, stop the container, back up and edit its
+`config.json`, then restart. Keep the saved account details and transfer history.
+A newly connected list copies its existing unchecked items when the bridge starts.
+For configuration examples, see [Advanced setup](ADVANCED_SETUP.md).
+
+## Optional settings
+
+Put settings in a file named `.env` in your project folder. You can copy
+`.env.example` as a starting point. After changing settings, **recreate the
+container through your Container Manager project** so they take effect.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `BRIDGE_POLL_INTERVAL` | `1m` | How often to check Keep for new items. |
+| `BRIDGE_DELETE_KEEP_ITEMS` | `false` | Set to `true` to delete delivered items instead of checking them off. |
+| `BRIDGE_CATEGORY_MATCHING` | `true` | Set to `false` to add items without choosing categories. |
+| `BRIDGE_CATEGORY_REFRESH_INTERVAL` | `7d` | How often to update the saved AnyList category choices. |
+
+For time settings, use a whole number followed by `s` (seconds), `m` (minutes),
+`h` (hours), or `d` (days). Examples: `30s`, `2m`, `6h`, `7d`.
+The allowed range is **30 seconds to 7 days**. Use one unit at a time, such as
+`90m` rather than `1h30m`.
+
+Deleting delivered items removes individual items, not the Keep checklist.
+Items whose delivery needs review remain in Keep.
+
+### How categories are chosen
+
+The bridge first uses AnyList's saved category choice for that item. Otherwise,
+it looks for a matching item already in the list, then a favorite, then a known
+name in AnyList's grocery database. For example, Cottage Cheese maps to Dairy.
+Capitalization and extra spaces do not affect matching. Unknown names may be
+added without a category.
+
+Category choices are saved to avoid downloading them repeatedly. A category
+change in AnyList can take up to seven days to reach the bridge by default;
+use a shorter `BRIDGE_CATEGORY_REFRESH_INTERVAL` if you need faster updates.
+If a category refresh fails, the bridge keeps its previous choices and retries.
+
+## Troubleshooting
+
+| What you see | What to do |
+| --- | --- |
+| “Waiting for configuration / setup to be completed” | Open the container terminal and run `synolistbridge setup`. |
+| “Unhealthy” before setup finishes | Finish setup and wait for the first successful transfer check. |
+| Setup was cancelled or sign-in failed | Run setup again. It will not overwrite an already saved setup. |
+| An item does not arrive | Check the container's Log tab and confirm you selected the correct lists. |
+| Items arrive, but no notification appears | Check the other member's AnyList notification settings and phone notification permissions. |
+| `PermissionError` with a NAS data folder | Follow the [data-folder permission instructions](ADVANCED_SETUP.md#store-data-in-a-nas-folder). |
+
+See [Operations and troubleshooting](OPERATIONS.md) for transfer review,
+backups, upgrades, and diagnostic commands. See [Advanced setup](ADVANCED_SETUP.md)
+for SSH commands, custom storage, and manual configuration.
+
+## Development and releases
+
+Use Python 3.12 or later:
 
 ```sh
 python3 -m venv .venv
@@ -203,12 +197,8 @@ python3 -m venv .venv
 .venv/bin/python -m synolistbridge --help
 ```
 
-Use Python 3.12 or later. The container uses Alpine for the pinned pyanylist
-ARM64 wheel. Tests use mocks; provider contract tests require the pinned
-packages. Test with real accounts on a supported NAS before production.
-
-When this project is the root of its own GitHub repository, the included CI
-workflow tests Python and builds x86-64 and ARM64 images. It does not publish
+Automated checks run tests and build container images for x86-64 and ARM64.
+Tests must pass with at least **80%** code coverage. The checks do not publish
 images. See [RELEASING.md](RELEASING.md) for the release process.
 
 ## License
@@ -218,51 +208,4 @@ See [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for
 upstream attribution. The original workflow came from
 [google-home-anylist-bridge](https://github.com/jfolger/google-home-anylist-bridge).
 
-This project is not affiliated with Google, AnyList, or Synology. Software
-licenses do not override the providers' service terms.
-
-GitHub Actions runs tests on pushes and pull requests. All tests must pass, and
-total statement coverage across `synolistbridge` must be at least **80%**.
-The coverage XML report is available as the `coverage-report` workflow artifact.
-To enforce this before merging, configure a GitHub branch ruleset or branch
-protection rule requiring the `test` status check.
-
-## Multiple list pairs
-
-Setup signs into one Google account and one AnyList account, then asks you to
-select a **Keep source checklist** and its **AnyList destination**. Choose
-"Add another list pair" to repeat, then review the full list of pairs before
-confirming. Each source appears only once; several sources can share a destination.
-Items go only to their paired destination. Setup itself does not transfer items,
-but the running container starts transfers immediately after configuration is saved.
-The first poll transfers **every existing unchecked, nonempty item in every
-selected Keep checklist**, then checks off or deletes each delivered item according
-to `BRIDGE_DELETE_KEEP_ITEMS`. Review all source lists before confirming.
-
-All pairs share `BRIDGE_POLL_INTERVAL` and `BRIDGE_CATEGORY_REFRESH_INTERVAL`.
-Each polling cycle processes pairs in order. A provider failure in one pair does
-not prevent the others from being processed. Transfer history and category caches
-are isolated per pair in SQLite under `data/routes/`. Existing single-list
-configurations and their original database remain supported; converting an existing
-pair to the array format retains its original transfer history.
-
-For manual configuration, replace the top-level `keep_list_id` and
-`anylist_list_id` fields with:
-
-```json
-"lists": [
-  {"keep_list_id": "KEEP_GROCERIES_ID", "anylist_list_id": "ANYLIST_GROCERIES_ID"},
-  {"keep_list_id": "KEEP_HARDWARE_ID", "anylist_list_id": "ANYLIST_HARDWARE_ID"}
-]
-```
-
-To change pairs later, stop the container, back up and edit its `config.json`,
-then restart. Keep credentials and data intact. Newly added pairs transfer all
-existing unchecked source items on their first poll. Removing a pair stops its
-processing and retains its database; restoring that same pair reuses its history.
-A different destination is a new route and can transfer remaining unchecked items
-again. Do not rerun initial setup or delete databases to change pairs.
-
-`status` includes source/destination IDs for array configurations. If a transfer ID
-appears in multiple routes, resolve it with
-`synolistbridge resolve --keep-list-id KEEP_ID ITEM_ID delivered` (or `retry`/`skip`).
+Software licenses do not override Google or AnyList's service terms.

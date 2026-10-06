@@ -8,7 +8,7 @@ from synolistbridge.anylist_categories import CategoryRules, builtin_categories,
 
 class CategoryRuleTests(unittest.TestCase):
     def test_saved_rules_are_scoped_to_destination_and_refresh(self):
-        category = field(1, 'dairy') + field(5, 'Dairy')
+        category = field(1, 'dairy') + field(5, 'Dairy') + field(7, 'dairy-system')
         group = field(1, 'group') + field(5, category)
         rule = field(4, 'group') + field(5, 'creama') + field(6, 'dairy')
         response = (field(1, 'destination') + field(7, field(1, group))
@@ -21,12 +21,14 @@ class CategoryRuleTests(unittest.TestCase):
                                                  "normalizedDisplayNamesIndex": {"milk": "milk"}}
             rules.refresh(str.casefold)
         self.assertEqual(rules.matches, {'creama': {'group': ('dairy', 'Dairy')}})
+        self.assertEqual(rules.category_system_ids, {'dairy': 'dairy-system'})
         rules.post.return_value = b''
         with patch("synolistbridge.anylist_categories.requests.get") as get:
             get.return_value.json.return_value = {"tags": {"milk": {"rootCategory": "dairy"}},
                                                  "normalizedDisplayNamesIndex": {"milk": "milk"}}
             rules.refresh(str.casefold)
         self.assertEqual(rules.matches, {})
+        self.assertEqual(rules.category_system_ids, {})
 
     def test_add_sends_modern_assignments_for_all_groups(self):
         client = Mock()
@@ -42,6 +44,39 @@ class CategoryRuleTests(unittest.TestCase):
         self.assertEqual(string(item, 4), 'Creama')
         self.assertEqual([(string(fields(x), 2), string(fields(x), 3)) for x in item[20]],
                          [('group', 'dairy'), ('second', 'food')])
+
+    def test_web_compatible_add_payload(self):
+        client = Mock()
+        client.user_id.return_value = 'user'
+        rules = CategoryRules(client, 'destination')
+        rules.category_system_ids = {'other-id': 'other'}
+        rules.post = Mock(return_value=b'')
+        rules.add('Shoes', {'group': ('other-id', 'Other')})
+        operation = fields(fields(rules.post.call_args.args[1])[1][0])
+        metadata = fields(operation[1][0])
+        item = fields(operation[6][0])
+        self.assertEqual(set(metadata), {1, 2, 3})
+        self.assertEqual(string(metadata, 2), 'add-shopping-list-item')
+        self.assertEqual(string(metadata, 3), 'user')
+        self.assertEqual(set(item), {1, 3, 4, 11, 12, 13, 20})
+        self.assertEqual(string(item, 11), 'other')
+        self.assertEqual(string(item, 13), 'other')
+        self.assertEqual(string(item, 12), 'user')
+
+    def test_plain_and_legacy_category_adds_omit_defaults(self):
+        client = Mock()
+        client.user_id.return_value = 'user'
+        rules = CategoryRules(client, 'destination')
+        rules.post = Mock(return_value=b'')
+        for category in (None, 'Custom Dairy'):
+            rules.add('Milk', category=category)
+            operation = fields(fields(rules.post.call_args.args[1])[1][0])
+            item = fields(operation[6][0])
+            self.assertNotIn(6, item)
+            self.assertNotIn(13, item)
+            self.assertNotIn(20, item)
+            self.assertEqual(string(item, 11), category or '')
+            self.assertNotIn(4, fields(operation[1][0]))
 
     def test_malformed_messages_fail_without_silent_partial_parsing(self):
         for payload in (b'\x0a\x03x', b'\x80', b'\x00', b'\x0b'):

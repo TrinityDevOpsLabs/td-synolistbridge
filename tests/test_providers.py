@@ -80,11 +80,14 @@ class ProviderTests(unittest.TestCase):
              patch("synolistbridge.anylist_categories.CategoryRules") as rules:
             rules.return_value.matches = {}
             rules.return_value.builtin_matches = {}
+            rules.return_value.category_system_ids = {}
+            rules.return_value.add.return_value = "created-item"
             destination = AnyListDestination(self.config)
             destination.validate()
             self.assertEqual(destination.lists(), [("destination", "Shopping")])
             self.assertEqual(destination.add("milk"), "created-item")
-            client.add_item.assert_called_once_with("destination", "milk")
+            rules.return_value.add.assert_called_once_with("milk")
+            client.add_item.assert_not_called()
             client.get_list_by_id.assert_called_once_with("destination")
 
 
@@ -122,11 +125,11 @@ class CategorizationTests(unittest.TestCase):
         destination.refresh_seconds = 604800
         destination.next_refresh = 0
         destination.cache_loaded = False
-        destination.category_rules = Mock(matches={}, builtin_matches={})
+        destination.category_rules = Mock(matches={}, builtin_matches={}, category_system_ids={})
         destination.client = Mock()
         destination.client.get_list_by_id.return_value = SimpleNamespace(items=items)
         destination.client.get_favourites.return_value = favourites
-        destination.client.add_item.return_value = SimpleNamespace(id="plain")
+        destination.category_rules.add.side_effect = lambda text, assignments=None, category=None: "categorized" if category else "plain"
         destination.client.add_item_with_details.return_value = SimpleNamespace(id="categorized")
         return destination
 
@@ -137,8 +140,8 @@ class CategorizationTests(unittest.TestCase):
         )
         destination.validate()
         self.assertEqual(destination.add("  MILK  "), "categorized")
-        destination.client.add_item_with_details.assert_called_once_with(
-            "destination", "  MILK  ", category="Custom Dairy")
+        destination.category_rules.add.assert_called_once_with(
+            "  MILK  ", category="Custom Dairy")
         destination.client.add_item.assert_not_called()
 
     def test_favourites_match_case_and_whitespace(self):
@@ -146,14 +149,15 @@ class CategorizationTests(unittest.TestCase):
             SimpleNamespace(name="Olive Oil", category="Pantry")])
         destination.validate()
         self.assertEqual(destination.add("olive   oil"), "categorized")
-        destination.client.add_item_with_details.assert_called_once_with(
-            "destination", "olive   oil", category="Pantry")
+        destination.category_rules.add.assert_called_once_with(
+            "olive   oil", category="Pantry")
 
     def test_unknown_names_are_added_without_guessing(self):
         destination = self.destination(items=[SimpleNamespace(name="milk", category=None)])
         destination.validate()
         self.assertEqual(destination.add("unknown"), "plain")
-        destination.client.add_item.assert_called_once_with("destination", "unknown")
+        destination.category_rules.add.assert_called_once_with("unknown")
+        destination.client.add_item.assert_not_called()
         destination.client.add_item_with_details.assert_not_called()
 
     def test_category_preferences_refresh_each_poll(self):
@@ -182,6 +186,7 @@ class CategorizationTests(unittest.TestCase):
     def test_saved_rule_used_after_item_deleted(self):
         destination = self.destination()
         destination.category_rules.matches = {"creama": {"group": ("dairy-id", "Dairy")}}
+        destination.category_rules.add.side_effect = None
         destination.category_rules.add.return_value = "saved-rule-item"
         destination.validate()
         self.assertEqual(destination.add("Creama"), "saved-rule-item")
@@ -220,6 +225,7 @@ class CategorizationTests(unittest.TestCase):
     def test_builtin_used_when_no_custom_match_exists(self):
         destination = self.destination()
         destination.category_rules.builtin_matches = {'cottage cheese': {'group': ('dairy', 'Dairy')}}
+        destination.category_rules.add.side_effect = None
         destination.category_rules.add.return_value = 'builtin-item'
         self.assertEqual(destination.add('Cottage Cheese'), 'builtin-item')
         destination.category_rules.add.assert_called_once_with(
@@ -239,5 +245,5 @@ class CategorizationTests(unittest.TestCase):
         destination.categories = {'milk': 'Dairy'}
         destination.category_rules.builtin_matches = {'milk': {'group': ('dairy', 'Dairy')}}
         self.assertEqual(destination.add('Milk'), 'plain')
-        destination.category_rules.add.assert_not_called()
+        destination.category_rules.add.assert_called_once_with("Milk")
         destination.client.add_item_with_details.assert_not_called()

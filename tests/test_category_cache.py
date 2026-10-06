@@ -49,7 +49,7 @@ class CategoryCacheTests(unittest.TestCase):
                                      anylist_list_id='destination', category_refresh_seconds=604800)
             state = State(directory, {'list': 'destination'})
             self.addCleanup(state.close)
-            payload = {'version': 2, 'rules': {}, 'categories': {},
+            payload = {'version': 3, 'category_system_ids': {'dairy': 'dairy'}, 'rules': {}, 'categories': {},
                        'builtin_rules': {'cottage cheese': {'group': ['dairy', 'Dairy']}}}
             state.save_categories(100, payload)
             client = Mock()
@@ -60,6 +60,7 @@ class CategoryCacheTests(unittest.TestCase):
                 with patch('synolistbridge.providers.time.time', return_value=101):
                     destination.validate()
                 self.assertEqual(destination.category_rules.builtin_matches, payload['builtin_rules'])
+                self.assertEqual(destination.category_rules.category_system_ids, {'dairy': 'dairy'})
                 client.get_favourites.assert_not_called()
                 state.save_categories(100, {'rules': {}, 'categories': {}})
                 upgraded = AnyListDestination(config, state)
