@@ -74,6 +74,7 @@ class CategoryRules:
         self.client_id = uuid.uuid4().hex
         self.matches = {}
         self.builtin_matches = {}
+        self.category_system_ids = {}
 
     def post(self, endpoint, payload):
         # The native client handles token refresh during validate() before this.
@@ -95,6 +96,7 @@ class CategoryRules:
         shopping = fields(data.get(1, [b""])[0])
         matches = {}
         system_categories = {}
+        category_system_ids = {}
         for raw in shopping.get(6, []):
             response = fields(raw)
             if string(response, 1) != self.list_id:
@@ -110,6 +112,7 @@ class CategoryRules:
                     system = string(category, 7)
                     if system and category_id and category_name:
                         system_categories.setdefault(system, {})[group_id] = (category_id, category_name)
+                        category_system_ids[category_id] = system
             for rule in map(fields, response.get(13, [])):
                 group_id, category_id = string(rule, 4), string(rule, 6)
                 name = string(rule, 5)
@@ -123,20 +126,31 @@ class CategoryRules:
             "https://www.anylist.com/static/webapp/data/tag_data.json", timeout=30)
         response.raise_for_status()
         builtin_matches = builtin_categories(response.json(), system_categories, key)
-        # Publish both snapshots together only after all reads succeed.
+        # Publish all category snapshots only after all reads succeed.
         self.matches = matches
         self.builtin_matches = builtin_matches
+        self.category_system_ids = category_system_ids
 
-    def add(self, name, assignments):
+    def add(self, name, assignments=None, category=None):
         item_id = uuid.uuid4().hex
         item = (field(1, item_id) + field(3, self.list_id) + field(4, name)
-                + field(6, 0) + field(12, self.client.user_id()))
-        for group_id, (category_id, _) in assignments.items():
+                + field(12, self.client.user_id()))
+        # Match the web client: omit explicit default fields and retain legacy
+        # system category metadata alongside modern category assignments.
+        system_ids = {self.category_system_ids[category_id]
+                      for category_id, _ in (assignments or {}).values()
+                      if category_id in self.category_system_ids}
+        if len(system_ids) == 1:
+            system_id = next(iter(system_ids))
+            item += field(11, system_id) + field(13, system_id)
+        elif category:
+            item += field(11, category)
+        for group_id, (category_id, _) in (assignments or {}).items():
             assignment = (field(1, uuid.uuid4().hex) + field(2, group_id)
                           + field(3, category_id))
             item += field(20, assignment)
         metadata = (field(1, uuid.uuid4().hex) + field(2, "add-shopping-list-item")
-                    + field(3, self.client.user_id()) + field(4, 0))
+                    + field(3, self.client.user_id()))
         operation = (field(1, metadata) + field(2, self.list_id)
                      + field(3, item_id) + field(6, item))
         self.post("data/shopping-lists/update", field(1, operation))
