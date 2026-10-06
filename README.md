@@ -201,6 +201,11 @@ Automated checks run tests and build container images for x86-64 and ARM64.
 Tests must pass with at least **80%** code coverage. The checks do not publish
 images. See [RELEASING.md](RELEASING.md) for the release process.
 
+## Support the project
+
+If SynoListBridge is useful to you, you can support its development on
+[GitHub Sponsors](https://github.com/sponsors/TrinityDevOpsLabs).
+
 ## License
 
 Copyright 2026 Trinity DevOps LLC. Licensed under [Apache-2.0](LICENSE).
