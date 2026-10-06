@@ -14,7 +14,7 @@ tag or publish the parent repository as a SynoListBridge release.
 - Increment **MINOR** for backwards-compatible features.
 - Increment **PATCH** for backwards-compatible fixes and documentation updates.
 
-Keep `synolistbridge/__init__.py`'s `__version__` and the release tag consistent. The initial planned version is `0.1.0`.
+Keep `synolistbridge/__init__.py`'s `__version__` and the release tag consistent. The examples below use `v1.0.1`; substitute the version being released.
 
 ## Publish a release
 
@@ -37,7 +37,7 @@ Keep `synolistbridge/__init__.py`'s `__version__` and the release tag consistent
 
    Require all tests to pass, including provider contract tests; do not accept
    skipped provider tests caused by missing dependencies. Confirm the GitHub
-   checks pass for both `linux/amd64` and `linux/arm64`. Test the browser wizard
+   checks pass for both `linux/amd64` and `linux/arm64`. Test interactive setup
    and a real Keep → AnyList transfer on a supported NAS before publishing.
    Validation commands above do not start a bridge or modify real accounts.
 3. Update `__version__`. Release descriptions are generated from commit
@@ -46,20 +46,20 @@ Keep `synolistbridge/__init__.py`'s `__version__` and the release tag consistent
 5. Create a signed tag when Git signing is configured:
 
    ```sh
-   git tag -s v0.1.0 -m "Release v0.1.0"
+   git tag -s v1.0.1 -m "Release v1.0.1"
    ```
 
    Otherwise, create an annotated tag:
 
    ```sh
-   git tag -a v0.1.0 -m "Release v0.1.0"
+   git tag -a v1.0.1 -m "Release v1.0.1"
    ```
 
 6. Push the branch and the specific tag:
 
    ```sh
    git push origin main
-   git push origin v0.1.0
+   git push origin v1.0.1
    ```
 
 7. Pushing a version tag automatically creates a draft release with notes from
