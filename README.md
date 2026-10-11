@@ -1,6 +1,10 @@
 # 🛒 SynoListBridge
 
-Send shopping items from Google Keep to AnyList using your Synology NAS.
+Send shopping items from Google Keep to AnyList using your Synology NAS or
+another Docker host.
+
+For a non-Synology installation, follow the [generic Docker setup guide](DOCKER_SETUP.md).
+The Synology Container Manager instructions are below.
 
 Add an item to a Google Keep checklist, either yourself or through Google Home.
 SynoListBridge copies it to the AnyList list you choose, then checks it off in
@@ -20,8 +24,9 @@ connections and is not affiliated with Google, AnyList, or Synology.
 
 ## What you need
 
-- A Synology NAS with **Container Manager** installed (x86-64 or ARM64).
-- Internet access on the NAS.
+- A Synology NAS with **Container Manager**, or another host with Docker Engine
+  and Docker Compose (x86-64 or ARM64).
+- Internet access on the Docker host.
 - A Google Keep **checklist**, rather than a plain text note.
 - A Google account that can access that checklist.
 - An AnyList account that can edit your destination list, and its email and password.
