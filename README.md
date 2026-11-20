@@ -204,7 +204,9 @@ python3 -m venv .venv
 
 Automated checks run tests and build container images for x86-64 and ARM64.
 Tests must pass with at least **80%** code coverage. The checks do not publish
-images. See [RELEASING.md](RELEASING.md) for the release process.
+images. The published GitHub Release supplies the version tag, and Actions
+fills in the release notes. See [RELEASING.md](RELEASING.md) for the release
+process.
 
 ## License
 

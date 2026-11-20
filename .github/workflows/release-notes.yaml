@@ -1,14 +1,12 @@
 name: Release notes from commits
 
 on:
-  push:
-    tags: ['v*']
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to update (also supports saved drafts)
+        description: Tag of an existing published GitHub Release
         required: true
         type: string
 
@@ -16,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-notes-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  group: release-notes-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -28,23 +26,25 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Generate notes and create or update the release
+      - name: Generate notes for the published release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+          REQUESTED_TAG: ${{ github.event.release.tag_name || inputs.tag }}
           NOTES_FILE: ${{ runner.temp }}/release-notes.md
-          EVENT_NAME: ${{ github.event_name }}
         run: |
-          python3 .github/scripts/release_notes.py "$RELEASE_TAG" "$GH_REPO" "$NOTES_FILE"
-          if [ "$EVENT_NAME" = push ]; then
-            # A pushed tag prepares a draft; publication remains a manual choice.
-            releases=$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[].tag_name')
-            if printf '%s\n' "$releases" | grep -Fxq -- "$RELEASE_TAG"; then
-              gh release edit "$RELEASE_TAG" --notes-file "$NOTES_FILE"
-            else
-              gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file "$NOTES_FILE"
-            fi
-          else
-            gh release edit "$RELEASE_TAG" --notes-file "$NOTES_FILE"
+          if [[ ! "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Use a version tag such as v1.0.3 or v1.1.0-rc.1."
+            exit 1
           fi
+          if ! release=$(gh release view "$REQUESTED_TAG" --json tagName,isDraft,publishedAt); then
+            echo "::error::Publish the GitHub Release before generating its notes."
+            exit 1
+          fi
+          if ! release_tag=$(jq -er --arg tag "$REQUESTED_TAG" \
+              'select(.tagName == $tag and .isDraft == false and .publishedAt != null) | .tagName' <<< "$release"); then
+            echo "::error::The requested tag must identify an existing published GitHub Release."
+            exit 1
+          fi
+          python3 .github/scripts/release_notes.py "$release_tag" "$GH_REPO" "$NOTES_FILE"
+          gh release edit "$release_tag" --notes-file "$NOTES_FILE"

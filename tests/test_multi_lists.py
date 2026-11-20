@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from synolistbridge.config import Config
 from synolistbridge.__main__ import main, route
 from synolistbridge.state import State
+from synolistbridge.providers import Item
 
 
 class MultipleListTests(unittest.TestCase):
@@ -58,12 +59,25 @@ class MultipleListTests(unittest.TestCase):
         self.assertEqual(state.get('old-item')['status'], 'done')
         state.close()
 
-    def test_account_connections_shared_and_successful_health(self):
-        with patch('synolistbridge.providers.KeepSource') as source, \
-             patch('synolistbridge.providers.AnyListDestination') as destination, \
-             patch('synolistbridge.__main__.Bridge') as bridge:
-            bridge.return_value.poll.return_value = 0
-            self.assertEqual(self.command('once'), 0)
-            self.assertIs(source.call_args_list[1].kwargs['client'], source.return_value.keep)
-            self.assertIs(destination.call_args_list[1].kwargs['client'], destination.return_value.client)
-        self.assertTrue((Path(self.temp.name) / 'health.json').exists())
+    def test_idle_routes_do_not_connect_to_anylist(self):
+        with patch("synolistbridge.providers.KeepSource") as source, \
+             patch("synolistbridge.providers.AnyListDestination") as destination:
+            source.return_value.items.return_value = []
+            self.assertEqual(self.command("once"), 0)
+            self.assertEqual(source.return_value.items.call_count, 2)
+            destination.assert_not_called()
+        self.assertTrue((Path(self.temp.name) / "health.json").exists())
+
+    def test_active_routes_share_account_connections(self):
+        with patch("synolistbridge.providers.KeepSource") as source, \
+             patch("synolistbridge.providers.AnyListDestination") as destination:
+            source.return_value.items.side_effect = [
+                [Item("first-item", "milk", False)],
+                [Item("second-item", "tape", False)],
+            ]
+            destination.return_value.add.side_effect = ["anylist-first", "anylist-second"]
+            self.assertEqual(self.command("once"), 0)
+            self.assertIs(source.call_args_list[1].kwargs["client"], source.return_value.keep)
+            self.assertIs(destination.call_args_list[1].kwargs["client"], destination.return_value.client)
+            self.assertEqual(destination.return_value.add.call_count, 2)
+        self.assertTrue((Path(self.temp.name) / "health.json").exists())
