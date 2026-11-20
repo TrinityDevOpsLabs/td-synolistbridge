@@ -125,6 +125,13 @@ def main(argv=None):
                 from .providers import KeepSource, AnyListDestination
                 bridges = [None] * len(states)
                 keep_client = anylist_client = None
+
+                def connect_destination(selected, state):
+                    nonlocal anylist_client
+                    destination = AnyListDestination(selected, state, client=anylist_client)
+                    anylist_client = destination.client
+                    return destination
+
                 while not stop.is_set():
                     reviews = 0
                     failed = False
@@ -132,9 +139,12 @@ def main(argv=None):
                         try:
                             if bridges[index] is None:
                                 source = KeepSource(selected, client=keep_client)
-                                destination = AnyListDestination(selected, state, client=anylist_client)
-                                keep_client, anylist_client = source.keep, destination.client
-                                bridges[index] = Bridge(source, destination, state)
+                                keep_client = source.keep
+                                bridges[index] = Bridge(
+                                    source, None, state,
+                                    destination_factory=lambda selected=selected, state=state:
+                                    connect_destination(selected, state),
+                                )
                             reviews += bridges[index].poll()
                         except sqlite3.Error:
                             logging.getLogger("synolistbridge").error("State database failed; stopping to preserve transfer safety")

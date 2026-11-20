@@ -6,12 +6,13 @@ LOG = logging.getLogger("synolistbridge")
 
 
 class Bridge:
-    def __init__(self, source, destination, state):
+    def __init__(self, source, destination, state, *, destination_factory=None):
         self.source, self.destination, self.state = source, destination, state
+        self.destination_factory = destination_factory
 
     def poll(self):
         items = {item.id: item for item in self.source.items()}
-        self.destination.validate()
+        destination_validated = False
         for item in items.values():
             if not item.checked and item.text.strip():
                 self.state.enqueue(item.id, item.text)
@@ -23,6 +24,13 @@ class Bridge:
                 if item is None or item.checked:
                     self.state.set(row["id"], "done")
                     continue
+                # Check the destination only when there is work to send. Do
+                # this before prepare(): a failed validation is safe to retry.
+                if not destination_validated:
+                    if self.destination is None:
+                        self.destination = self.destination_factory()
+                    self.destination.validate()
+                    destination_validated = True
                 self.state.prepare(row["id"], item.text)
                 try:
                     destination_id = self.destination.add(item.text)

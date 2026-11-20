@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from synolistbridge.bridge import Bridge
 from synolistbridge.providers import Item
@@ -55,6 +56,35 @@ class BridgeTests(unittest.TestCase):
         self.state.close()
         self.state = State(self.temp.name, self.route)
         self.bridge = Bridge(self.source, self.destination, self.state)
+
+    def test_idle_poll_does_not_create_or_validate_destination(self):
+        self.source.current = {"a": Item("a", "milk", True), "b": Item("b", " ", False)}
+        destination = Mock(wraps=self.destination)
+        factory = Mock(return_value=destination)
+        bridge = Bridge(self.source, None, self.state, destination_factory=factory)
+        self.assertEqual(bridge.poll(), 0)
+        factory.assert_not_called()
+        destination.validate.assert_not_called()
+        destination.add.assert_not_called()
+
+        self.source.current["a"] = Item("a", "milk", False)
+        self.source.current["b"] = Item("b", "bread", False)
+        self.assertEqual(bridge.poll(), 0)
+        factory.assert_called_once_with()
+        destination.validate.assert_called_once_with()
+        self.assertEqual(self.destination.sent, ["milk", "bread"])
+        self.assertEqual(bridge.poll(), 0)
+        destination.validate.assert_called_once_with()
+
+    def test_keep_only_completion_does_not_contact_destination(self):
+        self.state.enqueue("a", "milk")
+        self.state.prepare("a", "milk")
+        self.state.set("a", "delivered", "already-sent")
+        factory = Mock(side_effect=AssertionError("unexpected destination contact"))
+        bridge = Bridge(self.source, None, self.state, destination_factory=factory)
+        self.assertEqual(bridge.poll(), 0)
+        self.assertTrue(self.source.current["a"].checked)
+        factory.assert_not_called()
 
     def test_restart_does_not_duplicate_completed_transfer(self):
         self.bridge.poll()
@@ -156,6 +186,7 @@ class BridgeTests(unittest.TestCase):
             self.bridge.poll()
         self.assertFalse(self.source.current["a"].checked)
         self.assertEqual(self.destination.sent, [])
+        self.assertEqual(self.state.get("a")["status"], "pending")
 
     def test_database_cannot_be_reused_for_different_route(self):
         with self.assertRaises(ValueError):
