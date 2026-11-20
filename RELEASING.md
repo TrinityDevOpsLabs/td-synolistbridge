@@ -14,7 +14,8 @@ tag or publish the parent repository as a SynoListBridge release.
 - Increment **MINOR** for backwards-compatible features.
 - Increment **PATCH** for backwards-compatible fixes and documentation updates.
 
-Keep `synolistbridge/__init__.py`'s `__version__` and the release tag consistent. The examples below use `v1.0.1`; substitute the version being released.
+Choose the version in the GitHub Release. Its tag is the source of truth
+for release automation; no source-file version bump is required.
 
 ## Publish a release
 
@@ -40,37 +41,16 @@ Keep `synolistbridge/__init__.py`'s `__version__` and the release tag consistent
    checks pass for both `linux/amd64` and `linux/arm64`. Test interactive setup
    and a real Keep → AnyList transfer on a supported NAS before publishing.
    Validation commands above do not start a bridge or modify real accounts.
-3. Update `__version__`. Release descriptions are generated from commit
-   messages automatically; updating `CHANGELOG.md` is optional.
-4. Commit the release changes on the default branch.
-5. Create a signed tag when Git signing is configured:
-
-   ```sh
-   git tag -s v1.0.1 -m "Release v1.0.1"
-   ```
-
-   Otherwise, create an annotated tag:
-
-   ```sh
-   git tag -a v1.0.1 -m "Release v1.0.1"
-   ```
-
-6. Push the branch and the specific tag:
-
-   ```sh
-   git push origin main
-   git push origin v1.0.1
-   ```
-
-7. Pushing a version tag automatically creates a draft release with notes from
-   commit messages. Open that draft on GitHub, review the notes, attach any
-   intended assets, and publish it. If you create and publish a release directly
-   through GitHub, the workflow fills its description after publication.
-   The automatic source ZIP and `tar.gz` archives include the Dockerfile,
-   Compose configurations, application, and notices. Users can build those
-   sources in Container Manager. Do not attach populated data volumes or
-   configured account files.
-8. Mark unstable versions such as `v0.2.0-rc.1` as prereleases.
+3. Merge the release changes into the default branch and confirm CI passes.
+4. On GitHub, create a Release targeting that commit. Choose a version tag
+   such as `v1.0.3` and use the tag as the release title. If your signing
+   policy requires a pre-created tag, select that tag when creating the
+   Release. Pushing a tag alone does not create a Release.
+5. Attach any intended assets before publishing. The automatic source ZIP and
+   `tar.gz` archives include the Dockerfile, Compose configurations, application,
+   and notices. Do not attach populated data volumes or account files.
+6. Mark unstable versions such as `v1.1.0-rc.1` as prereleases, then publish.
+   GitHub Actions fills in the description using the published Release's tag.
 
 Never move or reuse a published version tag. Enable immutable releases in the
 repository settings after confirming the release workflow. CODEOWNERS review
@@ -90,17 +70,15 @@ Documentation; other commits appear under Other changes. Commit links and a
 full changelog link are included. These are commit summaries, so descriptive
 commit messages make useful release notes; the workflow does not summarize diffs.
 
-Pushing a version tag creates a draft release automatically or updates its
-existing release. Publishing a release regenerates the notes for both stable
-releases and prereleases. Direct branch pushes alone do not create releases.
-The workflow replaces the entire description; manual edits will be overwritten
-on publication or another run. `CHANGELOG.md` does not need to be updated.
+Publishing a GitHub Release generates notes for stable releases and
+prereleases. Branch pushes, tag pushes, and drafts do not generate release
+notes. The workflow replaces the release description; manual edits will be
+overwritten when it runs. `CHANGELOG.md` does not need to be updated.
 
-Commit and push the workflow and script to the default branch before use, and
-include the workflow in future release tags. To backfill an existing release
-or saved draft, run **Release notes from commits** manually from the Actions tab
-with its tag. No tag needs to be moved. Check the Actions run if notes do not
-appear after pushing a tag or publishing a release.
+Merge the workflow and script to the default branch before use. To retry an
+existing published release, run **Release notes from commits** from the Actions
+tab and enter its tag. The run verifies that the release is already published
+before regenerating its notes. It does not create a release or move a tag.
 
 `.github/release.yml` remains available for GitHub's optional **Generate release
 notes** button, which categorizes merged pull requests using labels.
