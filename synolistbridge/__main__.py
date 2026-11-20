@@ -35,9 +35,20 @@ def main(argv=None):
     resolve.add_argument("decision", choices=("delivered", "retry", "skip"))
     args = parser.parse_args(argv)
     os.umask(0o077)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    stdout = logging.StreamHandler(sys.stdout)
+    stdout.setLevel(logging.INFO)
+    stdout.addFilter(lambda record: record.levelno < logging.WARNING)
+    stderr = logging.StreamHandler(sys.stderr)
+    stderr.setLevel(logging.WARNING)
     # Dependencies may log raw provider responses; expose only our own safe messages.
-    logging.getLogger().setLevel(logging.CRITICAL)
+    for handler in (stdout, stderr):
+        handler.addFilter(logging.Filter("synolistbridge"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[stdout, stderr],
+        force=True,
+    )
     logging.getLogger("synolistbridge").setLevel(logging.INFO)
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())

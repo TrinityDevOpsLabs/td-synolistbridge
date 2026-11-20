@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import logging
 import os
 import tempfile
 import time
@@ -129,11 +130,32 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             read_secret(secret)
 
-    def test_provider_error_does_not_leak_secret(self):
-        with patch("synolistbridge.providers.KeepSource", side_effect=RuntimeError("SECRET-TOKEN")):
-            with self.assertLogs("synolistbridge", level="ERROR") as logs:
-                self.assertEqual(self.command("once"), 1)
-        self.assertNotIn("SECRET-TOKEN", " ".join(logs.output))
+    def test_successful_poll_logs_to_stdout_and_warning_to_stderr(self):
+        def poll():
+            logging.getLogger("synolistbridge").warning("Bridge warning")
+            logging.getLogger("provider").critical("PRIVATE-PROVIDER-RESPONSE")
+            return 0
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
+             patch("synolistbridge.providers.KeepSource"), \
+             patch("synolistbridge.__main__.Bridge") as bridge:
+            bridge.return_value.poll.side_effect = poll
+            self.assertEqual(main(["--config", str(self.path), "--data", self.temp.name, "once"]), 0)
+        self.assertIn("INFO Poll successful", stdout.getvalue())
+        self.assertNotIn("Poll successful", stderr.getvalue())
+        self.assertIn("WARNING Bridge warning", stderr.getvalue())
+        self.assertNotIn("Bridge warning", stdout.getvalue())
+        self.assertNotIn("PRIVATE-PROVIDER-RESPONSE", stdout.getvalue() + stderr.getvalue())
+
+    def test_provider_error_logs_to_stderr_without_leaking_secret(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
+             patch("synolistbridge.providers.KeepSource", side_effect=RuntimeError("SECRET-TOKEN")):
+            self.assertEqual(main(["--config", str(self.path), "--data", self.temp.name, "once"]), 1)
+        self.assertIn("ERROR List pair 1 failed (RuntimeError)", stderr.getvalue())
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertNotIn("SECRET-TOKEN", stderr.getvalue())
 
 
 if __name__ == "__main__":
